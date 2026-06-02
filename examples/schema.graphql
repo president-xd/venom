@@ -1,4 +1,4 @@
-# Example GraphQL schema (SDL) for MANTIS ingestion.
+# Example GraphQL schema (SDL) for VENOM ingestion.
 type Query {
   order(id: ID!): Order
   wallet: Wallet

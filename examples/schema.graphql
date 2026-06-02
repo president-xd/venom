@@ -1,0 +1,16 @@
+# Example GraphQL schema (SDL) for MANTIS ingestion.
+type Query {
+  order(id: ID!): Order
+  wallet: Wallet
+  user(id: ID!): User
+}
+
+type Mutation {
+  redeemPoints(amount: Int!): Wallet
+  refundOrder(id: ID!): Order
+  updateProfile(role: String, tier: String): User
+}
+
+type Order { id: ID!  status: String!  ownerId: ID! }
+type Wallet { balance: Int!  points: Int! }
+type User { id: ID!  email: String!  role: String! }

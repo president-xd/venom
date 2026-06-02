@@ -1,0 +1,47 @@
+{
+  "engagement_id": "ENG-2026-001",
+  "target_name": "AcmePay",
+  "authorized_base_urls": [
+    "https://api-staging.acmepay.example.com"
+  ],
+  "authorized_user_roles": ["free_user", "premium_user"],
+  "identities": [
+    {
+      "name": "attacker",
+      "role": "free_user",
+      "auth": {
+        "type": "login",
+        "method": "POST",
+        "path": "/api/v1/login",
+        "body": {"username": "attacker@example.com", "password": "REPLACE_ME"},
+        "token_path": "$.access_token",
+        "place": "header",
+        "header": "Authorization",
+        "scheme": "Bearer"
+      }
+    },
+    {
+      "name": "victim",
+      "role": "premium_user",
+      "auth": {
+        "type": "login",
+        "method": "POST",
+        "path": "/api/v1/login",
+        "body": {"username": "victim@example.com", "password": "REPLACE_ME"},
+        "token_path": "$.access_token"
+      }
+    }
+  ],
+  "out_of_scope": [
+    "stripe.com",
+    "auth0.com"
+  ],
+  "rate_limit_per_second": 5,
+  "allow_destructive": false,
+  "authorized_by": "Jane Smith, CISO",
+  "authorization_date": "2026-05-01T00:00:00Z",
+  "expiry_date": "2026-06-30T23:59:59Z",
+  "burp_mcp_enabled": false,
+  "air_gap_mode": false,
+  "llm_mode": "default"
+}

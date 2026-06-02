@@ -1,7 +1,7 @@
 """
 Adversarial hypothesis generation. For high-risk endpoints, ask the LLM to
 propose attack chains the deterministic playbooks might miss, using the five
-adversarial lenses from the CIPHER prompt (precondition bypass, sequence
+adversarial lenses (precondition bypass, sequence
 violation, concurrency, actor confusion, state rollback).
 
 Returns extra TestCase objects (origin="llm"). Safe no-op when no LLM exists.
@@ -22,7 +22,7 @@ logger = logging.getLogger("venom.inference")
 _counter = count(1)
 
 _SYSTEM = (
-    "You are CIPHER's hypothesis engine. Do NOT ask what the rules are. Given a "
+    "You are VENOM's hypothesis engine. Do NOT ask what the rules are. Given a "
     "state machine and endpoints, enumerate sequences of API calls that grant a "
     "financial or privilege benefit the actor is not entitled to. Apply five "
     "lenses to each financial/state endpoint: (1) precondition bypass, (2) sequence "

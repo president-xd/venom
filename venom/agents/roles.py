@@ -2,7 +2,7 @@
 Agent role definitions and the default model fleet.
 
 Each role maps to a model (overridable via an environment variable) and a
-role-specific system addendum that is appended to the CIPHER master prompt.
+role-specific system addendum that is appended to the VENOM master prompt.
 """
 
 from __future__ import annotations

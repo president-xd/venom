@@ -1,8 +1,8 @@
 """
 Authorization scope — the hard safety boundary for the entire agent.
 
-Per the CIPHER system prompt, the scope object is the FIRST thing loaded before
-any action, and these rules are non-negotiable:
+The scope object is the FIRST thing loaded before any action, and these rules
+are non-negotiable:
 
   - Never send a request to a host not in `authorized_base_urls`.
   - Never exceed `rate_limit_per_second`.
@@ -54,6 +54,8 @@ class Scope:
     # Account-lifecycle flow (registration + email verification):
     email_client_url: str = ""          # inbox URL to read confirmation links from
     privileged_email_domain: str = ""   # company/staff domain (else scraped from /register)
+    email_truncation_limit: int = 255   # storage width the app silently truncates emails to
+    privileged_account: str = "administrator"  # account to target via trusted-identity flaws
     objective_delete_user: str = ""     # opt-in destructive objective (needs allow_destructive)
     authorized_by: str = ""
     authorization_date: str | None = None

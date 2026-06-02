@@ -1,5 +1,5 @@
 """
-Engagement orchestrator — the end-to-end CIPHER pipeline:
+Engagement orchestrator — the end-to-end VENOM pipeline:
 
     load scope -> ingest artifacts -> infer business model -> generate tests
     -> execute (scope-guarded) -> report
@@ -166,6 +166,43 @@ async def run_engagement(
         except Exception as exc:  # noqa: BLE001
             logger.warning("Account-lifecycle flow error: %s", exc)
 
+    # 6c-bis. Exceptional-input registration flow (email length-truncation →
+    # privileged domain). Same preconditions as account-lifecycle (inbox + a
+    # register endpoint); a distinct vulnerability class so it runs independently.
+    if not dry_run and scope.email_client_url:
+        from .flows import exceptional_input
+        try:
+            xin = await exceptional_input(scope, ing.registry, transport=transport)
+            if xin:
+                cases += xin
+                logger.info("Exceptional-input flow confirmed %d finding(s)", len(xin))
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Exceptional-input flow error: %s", exc)
+
+    # 6c-ter. Trusted-identity account-management flow (change-password/email/delete
+    # that trusts a client-supplied username/id). Needs a low-priv identity + a
+    # change-password endpoint; targets the privileged account.
+    if not dry_run and scope.identities:
+        from .flows import account_privilege
+        try:
+            acp = await account_privilege(scope, ing.registry, transport=transport)
+            if acp:
+                cases += acp
+                logger.info("Account-privilege flow confirmed %d finding(s)", len(acp))
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Account-privilege flow error: %s", exc)
+
+    # 6c-quater. Flawed-login-state-machine flow (skip a post-login step → admin).
+    if not dry_run and scope.identities:
+        from .flows import login_statemachine
+        try:
+            lsm = await login_statemachine(scope, ing.registry, transport=transport)
+            if lsm:
+                cases += lsm
+                logger.info("Login-state-machine flow confirmed %d finding(s)", len(lsm))
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Login-state-machine flow error: %s", exc)
+
     # 6d. Coupon/discount-abuse flow (stacking via alternating codes).
     if not dry_run:
         from .flows import coupon_stacking
@@ -176,6 +213,43 @@ async def run_engagement(
                 logger.info("Coupon-stacking flow confirmed %d finding(s)", len(cpn))
         except Exception as exc:  # noqa: BLE001
             logger.warning("Coupon-stacking flow error: %s", exc)
+
+    # 6d-bis. Workflow-sequence-skip purchasing flow (cheap: add item + jump to
+    # order-confirmation). Try before the expensive overflow if nothing solved yet.
+    from .testing.schema import Verdict as _V
+    if not dry_run and not any(c.verdict == _V.CONFIRMED_EXPLOIT for c in cases):
+        from .flows import workflow_skip
+        try:
+            wfs = await workflow_skip(scope, ing.registry, transport=transport)
+            if wfs:
+                cases += wfs
+                logger.info("Workflow-skip flow confirmed %d finding(s)", len(wfs))
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Workflow-skip flow error: %s", exc)
+
+    # 6d-ter. Infinite-money flow (gift-card arbitrage; request-heavy). Try before
+    # the overflow if nothing cheaper solved the purchase yet.
+    if not dry_run and not any(c.verdict == _V.CONFIRMED_EXPLOIT for c in cases):
+        from .flows import infinite_money
+        try:
+            mny = await infinite_money(scope, ing.registry, transport=transport)
+            if mny:
+                cases += mny
+                logger.info("Infinite-money flow confirmed %d finding(s)", len(mny))
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Infinite-money flow error: %s", exc)
+
+    # 6e. Integer-overflow purchasing flow (expensive ~hundreds of requests) —
+    # only as a last resort when nothing cheaper already solved the purchase.
+    if not dry_run and not any(c.verdict == _V.CONFIRMED_EXPLOIT for c in cases):
+        from .flows import integer_overflow
+        try:
+            ovf = await integer_overflow(scope, ing.registry, transport=transport)
+            if ovf:
+                cases += ovf
+                logger.info("Integer-overflow flow confirmed %d finding(s)", len(ovf))
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Integer-overflow flow error: %s", exc)
 
     # SUMMARIZER subagent: terse coverage/results summary for the operator.
     if orch is not None and orch.enabled:

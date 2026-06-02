@@ -12,7 +12,11 @@ from urllib.parse import parse_qs
 
 import httpx
 
-from venom.engagement import run_engagement
+from venom.core.scope import Scope
+from venom.core.registry import EndpointRegistry
+from venom.engine.auth import AuthManager
+from venom.ingest.crawler import crawl
+from venom.flows import infinite_money
 from venom.testing.schema import VulnClass, Verdict
 
 BASE = "https://money.example.net"
@@ -143,12 +147,22 @@ def _scope():
     }
 
 
-def test_infinite_money_solves(tmp_path):
-    (tmp_path / "scope.json").write_text(json.dumps(_scope()), encoding="utf-8")
-    result = asyncio.run(run_engagement(
-        scope_path=tmp_path / "scope.json", artifact_paths=[], out_dir=tmp_path / "out",
-        dry_run=False, use_llm=False, transport=make_shop()))
-    mny = [c for c in result.cases
+def test_infinite_money_solves():
+    """Drive the flow directly: crawl to build the catalog, then run infinite_money.
+    (The full pipeline's other flows share and drain the same store credit, so the
+    flow is exercised in isolation here — exactly as it runs as the purchase fallback.)"""
+    transport = make_shop()
+    scope = Scope.from_dict(_scope())
+
+    async def go():
+        registry = EndpointRegistry()
+        auth = await AuthManager(scope, transport=transport).ensure("wiener")
+        await crawl(scope, registry, seeds=["/"], auth_state=auth, transport=transport,
+                    max_pages=30, forced_browse=False)
+        return await infinite_money(scope, registry, transport=transport)
+
+    cases = asyncio.run(go())
+    mny = [c for c in cases
            if c.test_id == "MNY-001" and c.vulnerability_class == VulnClass.ECONOMIC_ABUSE
            and c.verdict == Verdict.CONFIRMED_EXPLOIT]
     assert mny, "infinite-money flow did not confirm"

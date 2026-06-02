@@ -192,7 +192,6 @@ pyrightconfig.json
 build/
 dist/
 venom_data/
-mantis_data/
 
 # Internal planning + engagement artifacts (lab URLs/creds) — not for the public repo
 PLAN.md

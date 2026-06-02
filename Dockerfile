@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 
 # =============================================================================
-# VENOM — business-logic pentest agent
+# VENOM | Business-Logic pentest agent
 # Multi-stage build -> slim, non-root runtime image.
 # =============================================================================
 

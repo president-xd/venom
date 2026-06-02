@@ -1,8 +1,8 @@
 # VENOM
 
-**Context-aware business-logic penetration testing agent** — the runtime for the
-CIPHER system prompt. VENOM reconstructs how an application is *supposed* to
-work, then systematically attacks every assumption that model rests on:
+**Context-aware business-logic penetration testing agent.** VENOM reconstructs
+how an application is *supposed* to work, then systematically attacks every
+assumption that model rests on:
 sequence violations, BOLA/IDOR, race conditions, parameter/type confusion,
 mass-assignment privilege escalation, and economic-flow abuse.
 
@@ -217,7 +217,7 @@ venom/
   report/              Findings + evidence + Markdown/JSON/SARIF + audit trail
   data/wordlists/      Bundled forced-browse wordlist (packaged into Docker)
   utils.py             JSONPath, HTML extract, PII redaction, sandboxed eval
-  prompts/             Bundled CIPHER master system prompt
+  prompts/             Bundled VENOM master system prompt
   engagement.py        End-to-end orchestrator
   cli.py               Command-line interface
 scripts/               Burp + MCP download/run scripts (PowerShell + bash)

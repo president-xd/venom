@@ -55,10 +55,15 @@ BUSINESS_LOGIC_KB: list[dict] = [
         "id": "sequence-bypass",
         "name": "Users won't always follow the intended sequence",
         "signals": ["multi-step flow (cart→checkout, register→verify→use, 2FA)",
-                    "state-changing endpoints reachable directly"],
-        "probe": "Call a later step directly, or out of order, skipping a prior step.",
-        "exploit": "Skip payment/shipment/2FA/verification by jumping to the next-state endpoint.",
-        "refs": ["PortSwigger: intended sequence", "WSTG-BUSL-06"],
+                    "state-changing endpoints reachable directly",
+                    "a confirmation/success endpoint gated only by a query flag "
+                    "(e.g. order-confirmation?order-confirmed=true)"],
+        "probe": "Call a later step directly, or out of order, skipping a prior step; "
+                 "GET the order-confirmation endpoint with its success flag set.",
+        "exploit": "Skip payment/shipment/2FA/verification by jumping to the next-state endpoint; "
+                   "add an unaffordable item then hit order-confirmation directly to finalize it "
+                   "without the funds/payment check.",
+        "refs": ["PortSwigger: insufficient workflow validation", "WSTG-BUSL-06"],
     },
     {
         "id": "domain-specific",
@@ -67,6 +72,18 @@ BUSINESS_LOGIC_KB: list[dict] = [
         "probe": "Meet a threshold then change the order; redeem/refer in unexpected ways.",
         "exploit": "Qualify for a discount then remove items; self-refer; stack single-use coupons.",
         "refs": ["PortSwigger: Domain-specific flaws", "WSTG-BUSL-02/07"],
+    },
+    {
+        "id": "infinite-money",
+        "name": "Infinite money (gift-card / store-credit arbitrage)",
+        "signals": ["a reusable discount coupon (often via newsletter sign-up)",
+                    "a gift card / store-credit product that can be bought then redeemed",
+                    "redeemed value > discounted purchase price"],
+        "probe": "Buy a gift card with the coupon applied (pay < face value); redeem it and "
+                 "check whether store credit rises by more than you spent.",
+        "exploit": "Each cycle nets (face - discounted_price) credit; buy gift cards in bulk "
+                   "within current credit and redeem, growing credit until the target is affordable.",
+        "refs": ["PortSwigger: Infinite money logic flaw", "WSTG-BUSL-02"],
     },
     {
         "id": "idor-bola",
@@ -116,6 +133,47 @@ BUSINESS_LOGIC_KB: list[dict] = [
         "probe": "Use encoding/sub-addressing tricks so the validator and mailer disagree.",
         "exploit": "Bypass domain allow-lists to register/verify as a privileged domain.",
         "refs": ["PortSwigger: email parser discrepancies"],
+    },
+    {
+        "id": "exceptional-input-truncation",
+        "name": "Inconsistent handling of exceptional input (length truncation)",
+        "signals": ["registration/profile email that gates privilege by domain",
+                    "a privileged company/staff domain mentioned on the site (e.g. an admin contact)",
+                    "fixed-width storage (often 255 chars) that may silently truncate"],
+        "probe": "Register with an over-long email whose local part is padded so the FULL "
+                 "address is a deliverable subdomain of your own inbox, but the string truncated "
+                 "to the storage limit ends exactly at '@<privileged-domain>'.",
+        "exploit": "Pad the local part to (limit - len('@'+priv_domain)) chars, then append "
+                   "'@<priv_domain>.<your-inbox-domain>'. The mailer uses the full address "
+                   "(confirmation arrives in your inbox); the app stores the truncated value and "
+                   "treats you as belonging to the privileged domain → admin access.",
+        "refs": ["PortSwigger: Inconsistent handling of exceptional input", "WSTG-BUSL-03"],
+    },
+    {
+        "id": "login-state-machine",
+        "name": "Flawed login state machine (skip a step → privileged default)",
+        "signals": ["multi-step login (POST /login redirects to a second step like "
+                    "/role-selector, /mfa, /select-role)",
+                    "a privileged page reachable right after step 1"],
+        "probe": "Complete only login step 1, then request the privileged page directly "
+                 "WITHOUT visiting the intermediate step (which may downgrade your role).",
+        "exploit": "The session's default role before the second step is privileged: after "
+                   "POST /login go straight to /admin (never touch the role-selector) to act as admin.",
+        "refs": ["PortSwigger: Authentication bypass via flawed state machine", "WSTG-ATHN-09"],
+    },
+    {
+        "id": "trusted-identity-param",
+        "name": "Flawed privilege assumption from a trusted identity parameter",
+        "signals": ["account-management action (change-password / change-email / delete) that "
+                    "carries the account owner as a request field (hidden 'username'/'id')",
+                    "a verification step (current-password, token) that can be omitted or skipped"],
+        "probe": "Replay the action with the identity field set to another account (e.g. "
+                 "'administrator') and try dropping the verification field entirely.",
+        "exploit": "Server acts on the attacker-supplied identity instead of the session owner: "
+                   "set username=administrator and OMIT current-password to overwrite the admin's "
+                   "password, then log in as admin and use privileged functions (delete users).",
+        "refs": ["PortSwigger: flawed account-management logic",
+                 "OWASP API1:2023 (BOLA)", "WSTG-ATHZ-02"],
     },
 ]
 

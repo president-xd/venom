@@ -16,6 +16,8 @@
 # Put your real keys in .env (copied from .env.template). The .env file is
 # git-ignored and is NOT baked into the image.
 
+name: venom
+
 services:
   venom:
     build:

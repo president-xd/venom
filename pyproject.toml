@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "venom-agent"
 version = "0.1.0"
-description = "VENOM — Context-aware business-logic penetration testing agent (CIPHER runtime)"
+description = "VENOM — Context-aware business-logic penetration testing agent"
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "Proprietary — authorized engagements only" }

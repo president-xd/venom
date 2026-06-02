@@ -1,0 +1,97 @@
+{
+  "openapi": "3.0.3",
+  "info": { "title": "AcmePay API", "version": "1.0.0" },
+  "servers": [{ "url": "https://api-staging.acmepay.example.com" }],
+  "security": [{ "bearerAuth": [] }],
+  "paths": {
+    "/api/v1/orders": {
+      "post": {
+        "summary": "Create order",
+        "requestBody": {
+          "content": { "application/json": { "schema": {
+            "type": "object",
+            "required": ["product_id", "quantity"],
+            "properties": {
+              "product_id": { "type": "string" },
+              "quantity": { "type": "integer" },
+              "amount": { "type": "number" }
+            }
+          } } }
+        }
+      }
+    },
+    "/api/v1/orders/{id}": {
+      "get": {
+        "summary": "Get order",
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }]
+      }
+    },
+    "/api/v1/orders/{id}/ship": {
+      "post": {
+        "summary": "Ship order",
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }]
+      }
+    },
+    "/api/v1/orders/{id}/refund": {
+      "post": {
+        "summary": "Refund order",
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "requestBody": {
+          "content": { "application/json": { "schema": {
+            "type": "object",
+            "properties": { "reason": { "type": "string" }, "amount": { "type": "number" } }
+          } } }
+        }
+      }
+    },
+    "/api/v1/loyalty/redeem": {
+      "post": {
+        "summary": "Redeem loyalty points",
+        "requestBody": {
+          "content": { "application/json": { "schema": {
+            "type": "object",
+            "required": ["points"],
+            "properties": { "points": { "type": "integer" } }
+          } } }
+        }
+      }
+    },
+    "/api/v1/wallet/withdraw": {
+      "post": {
+        "summary": "Withdraw wallet balance",
+        "requestBody": {
+          "content": { "application/json": { "schema": {
+            "type": "object",
+            "required": ["amount"],
+            "properties": { "amount": { "type": "number" } }
+          } } }
+        }
+      }
+    },
+    "/api/v1/referrals/claim": {
+      "post": {
+        "summary": "Claim referral bonus",
+        "requestBody": {
+          "content": { "application/json": { "schema": {
+            "type": "object",
+            "properties": { "referral_code": { "type": "string" } }
+          } } }
+        }
+      }
+    },
+    "/api/v1/admin/users/{id}/role": {
+      "put": {
+        "summary": "Set user role (admin)",
+        "deprecated": true,
+        "tags": ["admin"],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "requestBody": {
+          "content": { "application/json": { "schema": {
+            "type": "object",
+            "properties": { "role": { "type": "string" } }
+          } } }
+        }
+      }
+    }
+  }
+}

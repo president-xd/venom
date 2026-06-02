@@ -1,7 +1,7 @@
 """
 The Agent wrapper. Each agent is a (role, model, provider) bound to the shared
 LLMRouter. It forces its own model/provider on every call and prepends the
-CIPHER master prompt + its role addendum to the system prompt.
+VENOM master prompt + its role addendum to the system prompt.
 """
 
 from __future__ import annotations

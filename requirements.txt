@@ -1,0 +1,11 @@
+httpx>=0.27
+python-dotenv>=1.0
+pyyaml>=6.0
+
+# Optional — RAG corpus (install with: pip install -r requirements.txt faiss-cpu numpy)
+# faiss-cpu>=1.8
+# numpy>=1.26
+
+# Optional — tests
+# pytest>=8.0
+# pytest-asyncio>=0.23

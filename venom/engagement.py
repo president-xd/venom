@@ -1,0 +1,202 @@
+"""
+Engagement orchestrator — the end-to-end CIPHER pipeline:
+
+    load scope -> ingest artifacts -> infer business model -> generate tests
+    -> execute (scope-guarded) -> report
+
+Designed to run safely offline (dry_run / no LLM) and to fail closed: nothing
+reaches the network without an authorized, unexpired scope.
+"""
+
+from __future__ import annotations
+
+import logging
+from dataclasses import dataclass, field
+from pathlib import Path
+
+from .core.scope import Scope
+from .core.registry import EndpointRegistry
+from .core.graph import BusinessModelGraph
+from .ingest import ingest
+from .inference import infer_business_model
+from .llm import LLMRouter
+from .testing import TestCase, generate_test_cases
+from .engine.runner import TestRunner
+from .report import write_report
+from .config import SETTINGS
+
+logger = logging.getLogger("venom.engagement")
+
+
+@dataclass
+class EngagementResult:
+    scope: Scope
+    registry: EndpointRegistry
+    graph: BusinessModelGraph
+    cases: list[TestCase]
+    artifacts: dict = field(default_factory=dict)
+    notes: list[str] = field(default_factory=list)
+
+
+async def run_engagement(
+    scope_path: str | Path,
+    artifact_paths: list[str | Path],
+    out_dir: str | Path,
+    *,
+    dry_run: bool = True,
+    use_llm: bool = True,
+    domain_docs: str = "",
+    discover: bool = False,             # force live discovery crawl on
+    crawl_seeds: list[str] | None = None,
+    think: bool = False,                # run the adaptive LLM reasoning loop
+    objective_text: str = "",           # the agent's goal (e.g. "buy the jacket")
+    transport=None,  # httpx transport override (tests / in-memory targets)
+) -> EngagementResult:
+    # 1. Authorization — first, always.
+    scope = Scope.from_file(scope_path)
+    scope.validate_window()
+    logger.info("Loaded scope:\n%s", scope.summary())
+
+    # 2. LLM router (optional; air-gap honored from scope).
+    router: LLMRouter | None = None
+    if use_llm:
+        router = LLMRouter.from_env(air_gap=scope.air_gap_mode, mode=scope.llm_mode)
+        if not router.any_enabled():
+            logger.warning("No LLM provider configured — running in OFFLINE mode.")
+            router = None
+
+    # 3. Ingest artifacts -> registry.
+    ing = ingest(artifact_paths)
+    if ing.secrets:
+        logger.warning("Possible secrets observed in artifacts (redacted): %s", ing.secrets)
+
+    # 3b. Live discovery (web-app mode): crawl the target to find forms/links,
+    # authenticated as the first identity. Only when enabled and not a dry run.
+    disc = dict(scope.discovery or {})
+    if discover:
+        disc["enabled"] = True
+    if disc.get("enabled") and not dry_run:
+        from .ingest.crawler import crawl
+        from .engine.auth import AuthManager
+
+        auth_state = None
+        if scope.identities:
+            try:
+                am = AuthManager(scope, dry_run=False, transport=transport)
+                auth_state = await am.ensure(scope.identities[0]["name"])
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Discovery auth failed (%s) — crawling unauthenticated.", exc)
+        info = await crawl(scope, ing.registry,
+                           seeds=crawl_seeds or disc.get("seeds"),
+                           auth_state=auth_state, transport=transport,
+                           max_pages=disc.get("max_pages", 40),
+                           forced_browse=disc.get("forced_browse", True))
+        ing.notes.append(f"Discovery crawl: {info['pages']} pages, {info['forms']} forms")
+
+    # 4-5. Reconstruct the business model and generate test cases. When the
+    # NVIDIA NIM multi-agent fleet is available, the orchestrator (DeepSeek)
+    # drives research + synthesis and the hypothesis subagent (Kimi) augments
+    # the deterministic playbooks. Otherwise we use the offline pipeline.
+    from .agents import build_orchestrator, AgentRole
+
+    identity_names = [i.get("name") for i in scope.identities if i.get("name")]
+
+    orch = build_orchestrator(router)
+    if orch is not None and orch.enabled:
+        logger.info("Multi-agent fleet active (base: %s).",
+                    orch.agent(AgentRole.ORCHESTRATOR).model)
+        graph = await orch.reconstruct_model(ing.registry, domain_docs=domain_docs)
+        cases = await generate_test_cases(
+            ing.registry, graph, hypothesis_agent=orch.agent(AgentRole.HYPOTHESIS),
+            identities=identity_names,
+        )
+        cases = await orch.concretize(cases)   # CODEGEN fills runnable conditions
+    else:
+        graph = await infer_business_model(ing.registry, router, domain_docs=domain_docs)
+        cases = await generate_test_cases(ing.registry, graph, router, identities=identity_names)
+    logger.info("Generated %d test cases", len(cases))
+
+    # 6. Execute under the scope guard (optionally routing OOB checks through Burp).
+    burp = None
+    if SETTINGS.burp_mcp_enabled:
+        from .integrations.burp_exec import BurpExecutor
+        burp = BurpExecutor(SETTINGS.burp_mcp_url)
+    runner = TestRunner(scope, dry_run=dry_run, transport=transport, burp=burp)
+    await runner.run_all(cases)
+
+    # 6b. Autonomous agent loop ("think before exploit"): a tool-using planner
+    # with working memory + skill learning. Lets VENOM attempt flaws no playbook
+    # covers by composing tools toward an objective, not running a fixed script.
+    agent_trace = None
+    if think and not dry_run and orch is not None and orch.enabled:
+        from .cognition import Agent, make_agent_brain, Objective
+        from .memory import SkillLibrary
+        from .llm.telemetry import ResponseCache, Budget, Tracer
+
+        # Cache + token budget + tracing on the router.
+        agent_trace = Tracer()
+        router.with_telemetry(cache=ResponseCache(),
+                              budget=Budget(max_tokens=SETTINGS.agent_token_budget),
+                              tracer=agent_trace)
+        # Model tiering: per-step decisions go to the FAST model (CODEGEN/Qwen),
+        # not the slow base model — cheaper and faster for many short reasoning steps.
+        objective = Objective.from_scope(scope, fallback=objective_text or scope.target_name)
+        brain = make_agent_brain(orch.agent(AgentRole.CODEGEN))
+        agent = Agent(scope, brain, transport=transport, skills=SkillLibrary())
+        try:
+            reasoned = await agent.run(ing.registry, objective)
+            if reasoned:
+                cases += reasoned
+                logger.info("Agent confirmed %d finding(s) toward objective", len(reasoned))
+        except Exception as exc:  # noqa: BLE001 — reasoning is best-effort
+            logger.warning("Agent error: %s", exc)
+        if router.budget is not None:
+            ing.notes.append(f"Agent LLM usage: {router.tracer.summary()} | {router.budget.summary()}")
+
+    # 6c. Account-lifecycle flow (registration + email verification + privilege
+    # via email domain). Runs when an inbox URL is configured and a register
+    # endpoint was discovered. Cross-host and stateful, so it's a flow, not a step.
+    if not dry_run and scope.email_client_url:
+        from .flows import account_takeover
+        try:
+            ato = await account_takeover(scope, ing.registry, transport=transport)
+            if ato:
+                cases += ato
+                logger.info("Account-lifecycle flow confirmed %d finding(s)", len(ato))
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Account-lifecycle flow error: %s", exc)
+
+    # 6d. Coupon/discount-abuse flow (stacking via alternating codes).
+    if not dry_run:
+        from .flows import coupon_stacking
+        try:
+            cpn = await coupon_stacking(scope, ing.registry, transport=transport)
+            if cpn:
+                cases += cpn
+                logger.info("Coupon-stacking flow confirmed %d finding(s)", len(cpn))
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Coupon-stacking flow error: %s", exc)
+
+    # SUMMARIZER subagent: terse coverage/results summary for the operator.
+    if orch is not None and orch.enabled:
+        brief = [{"class": c.vulnerability_class.value, "verdict": c.verdict.value}
+                 for c in cases]
+        summary = await orch.summarize_results(brief)
+        if summary:
+            ing.notes.append("Summary: " + summary)
+
+    # 7. Report (reporter agent writes the executive summary when available) +
+    #    audit trail of every outbound request.
+    reporter = orch.agent(AgentRole.REPORTER) if (orch and orch.enabled) else None
+    artifacts = await write_report(out_dir, scope, ing.registry, graph, cases,
+                                   reporter=reporter, audit=runner.audit_records())
+    if agent_trace is not None and agent_trace.calls:
+        trace_path = Path(out_dir) / "agent_trace.jsonl"
+        agent_trace.dump(trace_path)
+        artifacts["agent_trace"] = trace_path
+    logger.info("Report written to %s", artifacts["report"])
+
+    return EngagementResult(
+        scope=scope, registry=ing.registry, graph=graph, cases=cases,
+        artifacts=artifacts, notes=ing.notes,
+    )

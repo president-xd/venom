@@ -1,7 +1,7 @@
 """
 Business model graph — the agent's mental model of how the application is
 *supposed* to work. Four node types (Entity, Transition, Rule, Actor) plus
-explicit economic flows, per the CIPHER system prompt.
+explicit economic flows.
 
 The graph is the substrate for hypothesis generation: invalid transition paths,
 faith-based (unenforced) rules, and asymmetric economic flows are all read off it.

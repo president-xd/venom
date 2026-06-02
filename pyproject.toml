@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "venom-agent"
+version = "0.1.0"
+description = "VENOM — Context-aware business-logic penetration testing agent (CIPHER runtime)"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Proprietary — authorized engagements only" }
+authors = [{ name = "VENOM" }]
+dependencies = [
+    "httpx>=0.27",
+    "python-dotenv>=1.0",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+rag = ["faiss-cpu>=1.8", "numpy>=1.26"]
+burp = ["mcp>=1.0"]                       # Burp Suite MCP client (official SDK)
+dev = ["pytest>=8.0", "pytest-asyncio>=0.23"]
+
+[project.scripts]
+venom = "venom.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["venom*"]
+
+[tool.setuptools.package-data]
+"venom.prompts" = ["*.md"]
+"venom.data" = ["wordlists/*.txt"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

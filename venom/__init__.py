@@ -1,9 +1,9 @@
 """
 VENOM — Context-aware business-logic penetration testing agent.
 
-Runtime implementation of the CIPHER system prompt: ingest application context,
-reconstruct the intended business model, generate adversarial test cases, execute
-them safely within an authorized scope, and report confirmed findings.
+Ingests application context, reconstructs the intended business model, generates
+adversarial test cases, executes them safely within an authorized scope, and
+reports confirmed findings.
 
 Every outbound request passes through the scope guard (venom.core.scope). There
 is no code path that reaches the network without an authorized, unexpired scope.

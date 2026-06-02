@@ -1,5 +1,5 @@
 """
-Multi-provider LLM router for the VENOM / CIPHER pentest agent.
+Multi-provider LLM router for the VENOM pentest agent.
 
 Supported providers:
   - Anthropic (Claude)       -> cloud, strongest reasoning

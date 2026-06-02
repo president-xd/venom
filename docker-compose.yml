@@ -1,0 +1,63 @@
+# VENOM — Docker Compose
+#
+# VENOM is a CLI tool, not a long-running server, so you typically use
+# `docker compose run` rather than `up`:
+#
+#   docker compose build
+#   docker compose run --rm venom scope --scope examples/scope.json
+#   docker compose run --rm venom run   --scope examples/scope.json --in examples/
+#
+# For LOCAL / AIR-GAPPED LLM, start Ollama alongside it:
+#
+#   docker compose --profile local up -d ollama
+#   docker compose exec ollama ollama pull llama3.1:8b
+#   docker compose --profile local run --rm venom providers
+#
+# Put your real keys in .env (copied from .env.template). The .env file is
+# git-ignored and is NOT baked into the image.
+
+services:
+  venom:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: venom-agent:0.1.0
+    env_file:
+      # Optional — VENOM runs offline (playbooks only) if .env is absent.
+      - path: .env
+        required: false
+    environment:
+      # In-compose, reach the Ollama service by its DNS name, not localhost.
+      OLLAMA_BASE_URL: "http://ollama:11434/api/chat"
+    volumes:
+      - ./venom_data:/data                 # reports + engagement artifacts (writable)
+      - ./examples:/app/examples:ro         # sample artifacts (read-only)
+      - ./engagements:/engagements:ro       # drop your own scope.json + artifacts here
+    # CLI default; override per invocation with `docker compose run --rm venom <args>`
+    command: ["--help"]
+    depends_on: []
+
+  # Local LLM backend for air-gap / budget modes. Enabled only via profile.
+  ollama:
+    image: ollama/ollama:latest
+    profiles: ["local"]
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_models:/root/.ollama
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    # Uncomment to use an NVIDIA GPU for local inference:
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
+
+volumes:
+  ollama_models:

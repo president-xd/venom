@@ -2,8 +2,8 @@
 OpenAPI / Swagger ingestion (Stage 1 — highest fidelity).
 
 Parses paths, methods, parameters, request bodies, security requirements, and
-vendor `x-` extensions. Flags `deprecated`, `x-internal`, and `x-admin` markers,
-which the CIPHER prompt identifies as under-secured surfaces.
+vendor `x-` extensions. Flags `deprecated`, `x-internal`, and `x-admin` markers
+as under-secured surfaces.
 """
 
 from __future__ import annotations

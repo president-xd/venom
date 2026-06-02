@@ -6,7 +6,7 @@ _DIR = Path(__file__).parent
 
 
 def agent_system_prompt() -> str:
-    """The CIPHER master system prompt used to drive LLM reasoning."""
+    """The VENOM master system prompt used to drive LLM reasoning."""
     return (_DIR / "agent_system_prompt.md").read_text(encoding="utf-8")
 
 

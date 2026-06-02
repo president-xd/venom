@@ -1,5 +1,5 @@
 """
-Structured schemas for test cases and findings (matches the CIPHER prompt).
+Structured schemas for test cases and findings.
 """
 
 from __future__ import annotations

@@ -112,9 +112,12 @@ async def run(scope: Scope, registry, *, transport=None) -> list[TestCase]:
     steps: list[TestStep] = []
     try:
         home = await get("/")
-        await post("/sign-up", {"csrf": _csrf(home.text if home else ""), "email": "venom@money.lab"})
-        su = await get("/")
-        m = _COUPON.search((home.text or "") + (su.text if su else ""))
+        # The coupon is revealed on the sign-up confirmation page (the POST's
+        # redirect target, e.g. /?sign-up-confirmed=true) — capture that response.
+        su = await post("/sign-up", {"csrf": _csrf(home.text if home else ""), "email": "venom@money.lab"})
+        conf = await get("/?sign-up-confirmed=true")
+        blob = (home.text or "") + (su.text if su else "") + (conf.text if conf else "")
+        m = _COUPON.search(blob)
         coupon = m.group(1).upper() if m else ""
         if not coupon:
             logger.info("infinite-money: no coupon found — skipping")

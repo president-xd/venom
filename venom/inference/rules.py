@@ -19,7 +19,7 @@ from ..prompts import agent_system_prompt
 logger = logging.getLogger("venom.inference")
 
 _SYSTEM = (
-    "You are CIPHER's business-model inference module. Given an API endpoint "
+    "You are VENOM's business-model inference module. Given an API endpoint "
     "registry and optional domain documentation, reconstruct the application's "
     "INTENDED business model. Identify domain entities and their state machines, "
     "the business rules that constrain them (RATE_LIMIT, UNIQUENESS, TEMPORAL, "

@@ -197,6 +197,7 @@ mantis_data/
 # Internal planning + engagement artifacts (lab URLs/creds) — not for the public repo
 PLAN.md
 engagements/
+commit.sh
 tools/
 
 # Built Visual Studio Code Extensions

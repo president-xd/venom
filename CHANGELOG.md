@@ -99,6 +99,11 @@ authenticated exploits**, executes them under a fail-safe scope guard, and
   mass-assignment, economic, faith-based) and **web-app playbooks** (client-side
   price/parameter tampering with full add-to-cart→checkout chain, web IDOR,
   forced-browse access control); provisioning `setup_steps`.
+- **Integer-overflow purchasing flow** (`venom/flows/integer_overflow.py`) — when the
+  cart total is a signed 32-bit int, it computes (from the discovered catalog +
+  modulus) the exact bulk-add sequence to overflow the total and land it within store
+  credit with the target in the cart, verifies the live total, then checks out. Runs
+  only as a last resort (it's request-heavy).
 - **Cart-total balancing playbook** — for quantity-trusting carts with no client
   price: discovery captures the product **catalog** (prices) and **store credit**,
   then buys the expensive target by adding a cheap product at a computed **negative

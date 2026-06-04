@@ -79,3 +79,9 @@ def configure_logging(level: str | None = None) -> None:
         format="%(asctime)s  %(levelname)-7s  %(name)s  %(message)s",
         datefmt="%H:%M:%S",
     )
+    # Ensure no provider API key / bearer token can ever be written to a log.
+    from .utils import SecretLogFilter
+    flt = SecretLogFilter()
+    for h in logging.getLogger().handlers:
+        if not any(isinstance(f, SecretLogFilter) for f in h.filters):
+            h.addFilter(flt)

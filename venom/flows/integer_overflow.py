@@ -161,7 +161,8 @@ async def run(scope: Scope, registry, *, transport=None) -> list[TestCase]:
             business_impact="Buy expensive goods for an unintended price via integer overflow.",
             steps=steps_run,
             origin="flow",
-            verdict=Verdict.CONFIRMED_EXPLOIT,
+            # Only claim a confirmed exploit when the win-oracle actually fired.
+            verdict=Verdict.CONFIRMED_EXPLOIT if solved else Verdict.NEEDS_REVIEW,
             notes=["LAB SOLVED (is-solved)" if solved else f"order placed at total {_signed(tf)} cents"],
             rag_source="PortSwigger: Low-level logic flaw / WSTG-BUSL-01",
         )]

@@ -17,6 +17,7 @@ is intentionally no bypass flag.
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -50,6 +51,8 @@ class Scope:
     out_of_scope: list[str] = field(default_factory=list)
     rate_limit_per_second: float = 5.0
     allow_destructive: bool = False
+    max_destructive_actions: int = 0    # 0 = unlimited; >0 caps state-changing actions per engagement
+    _destructive_used: int = field(default=0, repr=False)    # runtime counter (governance)
     allow_pii_capture: bool = False     # if False, PII is redacted from evidence/logs
     # Account-lifecycle flow (registration + email verification):
     email_client_url: str = ""          # inbox URL to read confirmation links from
@@ -139,17 +142,29 @@ class Scope:
 
     def assert_request_allowed(self, method: str, url: str, *, destructive: bool = False) -> None:
         """The single chokepoint. Raises ScopeError if the request is not allowed."""
+        # Operational kill-switch: an operator can halt ALL outbound requests instantly.
+        if os.getenv("VENOM_KILL_SWITCH", "").lower() in ("1", "true", "yes"):
+            raise ScopeError("KILL SWITCH engaged (VENOM_KILL_SWITCH) — all requests halted.")
         self.validate_window()
         if not self.is_url_in_scope(url):
             raise ScopeError(
                 f"OUT OF SCOPE: {method} {url} is not within authorized_base_urls "
                 f"{self.authorized_base_urls} (or is explicitly out_of_scope). Request blocked."
             )
-        if destructive and not self.allow_destructive:
-            raise ScopeError(
-                f"DESTRUCTIVE action blocked: {method} {url}. "
-                "Set allow_destructive=true in the scope to permit this."
-            )
+        if destructive:
+            if not self.allow_destructive:
+                raise ScopeError(
+                    f"DESTRUCTIVE action blocked: {method} {url}. "
+                    "Set allow_destructive=true in the scope to permit this."
+                )
+            # Governance: cap the number of destructive actions per engagement.
+            if self.max_destructive_actions:
+                if self._destructive_used >= self.max_destructive_actions:
+                    raise ScopeError(
+                        f"DESTRUCTIVE budget exhausted ({self._destructive_used}/"
+                        f"{self.max_destructive_actions}) — further state-changing actions blocked."
+                    )
+                self._destructive_used += 1
 
     def pentest_header(self) -> dict[str, str]:
         return {"X-Pentest-ID": self.engagement_id}

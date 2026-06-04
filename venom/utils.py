@@ -105,3 +105,36 @@ def redact(text: str | None, *, allow: bool = False) -> str | None:
     for pat, repl in _PII_PATTERNS:
         out = pat.sub(repl, out)
     return out
+
+
+# --- Provider/API secret redaction (ALWAYS on, even when PII capture is allowed) ---
+_SECRET_PATTERNS = [
+    (re.compile(r"\b(?:nvapi|sk-or-v1|sk-ant|sk|pk|rk)-[A-Za-z0-9_\-]{12,}"), "<redacted-key>"),
+    (re.compile(r"(?i)bearer\s+[A-Za-z0-9._\-]{12,}"), "Bearer <redacted>"),
+    (re.compile(r"(?i)(api[_-]?key|authorization|x-api-key)\s*[:=]\s*\S+"), r"\1=<redacted>"),
+]
+
+
+def redact_secrets(text):
+    """Strip provider API keys / bearer tokens from any string. Never disabled —
+    a secret must not reach logs or artifacts regardless of PII settings."""
+    if not text:
+        return text
+    out = str(text)
+    for pat, repl in _SECRET_PATTERNS:
+        out = pat.sub(repl, out)
+    return out
+
+
+class SecretLogFilter(logging.Filter):
+    """logging.Filter that redacts API keys/tokens from every emitted record."""
+
+    def filter(self, record):  # noqa: A003
+        try:
+            msg = record.getMessage()
+            red = redact_secrets(msg)
+            if red != msg:
+                record.msg, record.args = red, ()
+        except Exception:  # noqa: BLE001 — logging must never raise
+            pass
+        return True

@@ -87,7 +87,10 @@ DEFAULT_AGENTS: dict[AgentRole, AgentSpec] = {
     ),
     AgentRole.CODEGEN: AgentSpec(
         role=AgentRole.CODEGEN,
-        default_model="qwen/qwen3.5-397b-a17b",
+        # Llama-4 Maverick returns clean fenced/JSON output fast on NVIDIA NIM and is
+        # the verified-working codegen path. (deepseek-v4-pro is listed on NIM but
+        # hangs — 200s+ ReadTimeout even on a 1-token prompt — verified 2026-06-04.)
+        default_model="meta/llama-4-maverick-17b-128e-instruct",
         env_var="VENOM_MODEL_CODEGEN",
         description="Generate concrete, executable test steps and payloads.",
         system_addendum=(

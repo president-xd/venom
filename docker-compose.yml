@@ -39,6 +39,19 @@ services:
     command: ["--help"]
     depends_on: []
 
+  # Deliberately-vulnerable target for exercising the autonomous agent end-to-end.
+  # `docker compose up -d vulnlab` then hunt http://localhost:8000.
+  vulnlab:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: venom-agent:0.1.0
+    entrypoint: ["python", "-m", "vulnlab.app"]
+    environment:
+      PORT: "8000"
+    ports:
+      - "8000:8000"
+
   # Local LLM backend for air-gap / budget modes. Enabled only via profile.
   ollama:
     image: ollama/ollama:latest

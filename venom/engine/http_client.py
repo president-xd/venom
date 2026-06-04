@@ -93,6 +93,12 @@ class ScopedClient:
         self.set_auth(headers=getattr(state, "headers", None),
                       cookies=getattr(state, "cookies", None))
 
+    def clear_cookies(self) -> None:
+        """Drop all cookies in the jar. Used before an in-session identity switch so a
+        manually-applied (domain-less) baseline cookie cannot shadow the fresh
+        Set-Cookie issued by a subsequent login (httpx duplicate-cookie pitfall)."""
+        self._client.cookies.clear()
+
     def _full_url(self, path: str) -> str:
         return urljoin(self.base_url, path.lstrip("/"))
 

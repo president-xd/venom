@@ -170,6 +170,115 @@ def _cmd_run(args) -> int:
     return 0
 
 
+def build_hunt_scope(args) -> dict:
+    """Synthesize an authorized engagement scope dict from `hunt` CLI args.
+    Pure (no I/O) so it can be unit-tested."""
+    from datetime import datetime, timezone, timedelta
+
+    now = datetime.now(timezone.utc)
+    bases = [args.url.rstrip("/")]
+    if args.email_client:
+        host = args.email_client.split("//")[-1].split("/")[0]
+        if host and host not in args.url:
+            bases.append("https://" + host)
+    scope = {
+        "engagement_id": "HUNT-" + now.strftime("%Y%m%d-%H%M%S"),
+        "target_name": args.url,
+        "authorized_base_urls": bases,
+        "discovery": {"enabled": True, "seeds": ["/"], "max_pages": args.max_pages, "forced_browse": True},
+        "rate_limit_per_second": args.rate,
+        "allow_destructive": args.allow_destructive or bool(args.delete_user),
+        "authorization_date": now.isoformat(),
+        "expiry_date": (now + timedelta(days=1)).isoformat(),
+        "authorized_by": "venom hunt (operator-supplied target)",
+    }
+    if args.login:
+        u, _, p = args.login.partition(":")
+        scope["identities"] = [{"name": u, "role": "user", "auth": {
+            "type": "form_login", "login_url": args.login_url, "method": "POST",
+            "username_field": "username", "password_field": "password",
+            "username": u, "password": p, "csrf_field": "csrf"}}]
+    if args.email_client:
+        scope["email_client_url"] = args.email_client
+    if args.delete_user:
+        scope["objective_delete_user"] = args.delete_user
+    if args.objective:
+        scope["objective"] = {"description": args.objective}
+    return scope
+
+
+def _cmd_hunt(args) -> int:
+    """Point-and-hunt: synthesize an authorized scope from a URL and run the
+    autonomous agent loop (crawl + reason + exploit) against it."""
+    import json
+    import tempfile
+
+    scope = build_hunt_scope(args)
+    tf = Path(tempfile.gettempdir()) / f"{scope['engagement_id']}.json"
+    tf.write_text(json.dumps(scope, indent=2), encoding="utf-8")
+    print(f"[hunt] target {args.url} — scope {tf}")
+
+    # Delegate to the engagement runner in autonomous live mode.
+    args.scope = str(tf)
+    args.inputs, args.seed, args.docs = [], [], []
+    args.crawl = args.live = args.think = True
+    args.no_llm = False
+    if not args.objective:
+        args.objective = ("Discover and exploit a business-logic flaw to reach the win condition "
+                          "(e.g. admin access / unintended purchase); verify success from the response.")
+    return _cmd_run(args)
+
+
+def _cmd_oneshot(args) -> int:
+    """LLM-frugal hunt: deterministic crawl -> ONE concise synthesis call ->
+    self-verified exploit script (hard-capped LLM calls). Survives free tiers."""
+    import asyncio
+    from pathlib import Path as _P
+    from .core.scope import Scope
+    from .core.registry import EndpointRegistry
+    from .ingest.crawler import crawl
+    from .engine.auth import AuthManager
+    from .llm import LLMRouter
+    from .agents import build_orchestrator, AgentRole
+    from .cognition import oneshot_hunt, make_oneshot_synthesizer, Objective
+
+    scope = Scope.from_dict(build_hunt_scope(args))
+    scope.validate_window()
+    router = LLMRouter.from_env(air_gap=scope.air_gap_mode, mode=scope.llm_mode)
+    if not router.any_enabled():
+        print("[oneshot] no LLM provider enabled — set a key in .env"); return 2
+
+    async def go():
+        registry = EndpointRegistry()
+        auth = None
+        if scope.identities:
+            try:
+                auth = await AuthManager(scope, dry_run=False).ensure(scope.identities[0]["name"])
+            except Exception as exc:  # noqa: BLE001
+                print(f"[oneshot] login failed ({exc}) — crawling unauthenticated")
+        await crawl(scope, registry, seeds=["/"], auth_state=auth,
+                    max_pages=args.max_pages, forced_browse=True)
+        orch = build_orchestrator(router)
+        synth = make_oneshot_synthesizer(orch.agent(AgentRole.CODEGEN))
+        obj = Objective.from_scope(scope, fallback=args.objective or
+                                   "find and exploit a business-logic flaw to reach the win condition")
+        return await oneshot_hunt(scope, registry, synth, objective=obj,
+                                  max_llm_calls=args.max_llm_calls)
+
+    findings = asyncio.run(go())
+    print(f"\n[oneshot] {len(findings)} confirmed exploit(s)")
+    for f in findings:
+        print(f"  {f.test_id} {f.verdict.value} — {f.hypothesis[:90]}")
+        code = f.evidence.get("exploit_code", "")
+        if args.out and code:
+            out = _P(args.out); out.mkdir(parents=True, exist_ok=True)
+            (out / "exploit.py").write_text(code, encoding="utf-8")
+            print(f"  exploit script -> {out / 'exploit.py'}")
+        elif code:
+            print("  --- exploit.py ---\n" + code)
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="venom", description="VENOM business-logic pentest agent")
     p.add_argument("--log-level", default=None, help="DEBUG|INFO|WARNING|ERROR")
@@ -209,10 +318,39 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Run the autonomous agent loop (tools+memory; needs --live + an LLM)")
     r.add_argument("--objective", default="", help="Agent goal, e.g. \"buy the jacket\"")
     r.set_defaults(func=_cmd_run)
+
+    h = sub.add_parser("hunt", help="Point-and-hunt: autonomous agent against a target URL")
+    h.add_argument("url", help="Target base URL (you must be authorized to test it)")
+    h.add_argument("--login", default="", help="Credentials user:pass for form login")
+    h.add_argument("--login-url", default="/login", help="Login form path (default /login)")
+    h.add_argument("--email-client", default="", help="Inbox URL for email-verification flows")
+    h.add_argument("--delete-user", default="", help="Destructive objective: delete this user")
+    h.add_argument("--objective", default="", help="Free-text goal for the agent")
+    h.add_argument("--allow-destructive", action="store_true", help="Permit state-changing exploits")
+    h.add_argument("--max-pages", type=int, default=40, help="Crawl page budget (default 40)")
+    h.add_argument("--rate", type=float, default=10.0, help="Max requests/sec (default 10)")
+    h.add_argument("--out", default=None, help="Output directory for the report")
+    h.set_defaults(func=_cmd_hunt)
+
+    o = sub.add_parser("oneshot", help="LLM-frugal hunt: recon -> 1 synthesis call -> exploit script")
+    o.add_argument("url", help="Target base URL (you must be authorized to test it)")
+    o.add_argument("--login", default="", help="Credentials user:pass for form login")
+    o.add_argument("--login-url", default="/login", help="Login form path (default /login)")
+    o.add_argument("--email-client", default="", help="Inbox URL for email-verification flows")
+    o.add_argument("--delete-user", default="", help="Destructive objective: delete this user")
+    o.add_argument("--objective", default="", help="Free-text goal for the synthesis")
+    o.add_argument("--allow-destructive", action="store_true", help="Permit state-changing exploits")
+    o.add_argument("--max-pages", type=int, default=40, help="Crawl page budget (default 40)")
+    o.add_argument("--rate", type=float, default=10.0, help="Max requests/sec (default 10)")
+    o.add_argument("--max-llm-calls", type=int, default=3, help="Hard cap on synthesis calls (default 3)")
+    o.add_argument("--out", default=None, help="Directory to write exploit.py")
+    o.set_defaults(func=_cmd_oneshot)
     return p
 
 
 def main(argv: list[str] | None = None) -> int:
+    from ._env import load_dotenv
+    load_dotenv()   # so provider keys in .env work without manual export
     args = build_parser().parse_args(argv)
     configure_logging(args.log_level)
     return args.func(args)

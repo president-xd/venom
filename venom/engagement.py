@@ -28,6 +28,25 @@ from .config import SETTINGS
 logger = logging.getLogger("venom.engagement")
 
 
+async def _lab_solved(scope, transport) -> bool:
+    """Trustworthy win-oracle: ask the live target whether it is actually solved.
+    Used to gate expensive purchase flows so a false-positive playbook verdict
+    cannot suppress the precise exploit (and a genuine solve stops further work)."""
+    from .engine.http_client import RateLimiter, ScopedClient
+    try:
+        c = ScopedClient(scope, scope.authorized_base_urls[0], role="win-oracle",
+                         limiter=RateLimiter(scope.rate_limit_per_second), transport=transport)
+    except ValueError:
+        return False
+    try:
+        r = await c.request("GET", "/", follow_redirects=True)
+        return bool(r is not None and "is-solved" in (r.text or ""))
+    except Exception:  # noqa: BLE001
+        return False
+    finally:
+        await c.aclose()
+
+
 @dataclass
 class EngagementResult:
     scope: Scope
@@ -166,6 +185,18 @@ async def run_engagement(
         except Exception as exc:  # noqa: BLE001
             logger.warning("Account-lifecycle flow error: %s", exc)
 
+    # 6c-sext. Email parser-discrepancy flow (Splitting the email atom): register a
+    # privileged-domain account that actually delivers to an attacker inbox.
+    if not dry_run and scope.email_client_url:
+        from .flows import email_parser
+        try:
+            emp = await email_parser(scope, ing.registry, transport=transport)
+            if emp:
+                cases += emp
+                logger.info("Email-parser flow confirmed %d finding(s)", len(emp))
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Email-parser flow error: %s", exc)
+
     # 6c-bis. Exceptional-input registration flow (email length-truncation →
     # privileged domain). Same preconditions as account-lifecycle (inbox + a
     # register endpoint); a distinct vulnerability class so it runs independently.
@@ -203,6 +234,17 @@ async def run_engagement(
         except Exception as exc:  # noqa: BLE001
             logger.warning("Login-state-machine flow error: %s", exc)
 
+    # 6c-quinque. Encryption-oracle flow (forge stay-logged-in via comment oracle).
+    if not dry_run and scope.identities:
+        from .flows import encryption_oracle
+        try:
+            enc = await encryption_oracle(scope, ing.registry, transport=transport)
+            if enc:
+                cases += enc
+                logger.info("Encryption-oracle flow confirmed %d finding(s)", len(enc))
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Encryption-oracle flow error: %s", exc)
+
     # 6d. Coupon/discount-abuse flow (stacking via alternating codes).
     if not dry_run:
         from .flows import coupon_stacking
@@ -215,9 +257,9 @@ async def run_engagement(
             logger.warning("Coupon-stacking flow error: %s", exc)
 
     # 6d-bis. Workflow-sequence-skip purchasing flow (cheap: add item + jump to
-    # order-confirmation). Try before the expensive overflow if nothing solved yet.
-    from .testing.schema import Verdict as _V
-    if not dry_run and not any(c.verdict == _V.CONFIRMED_EXPLOIT for c in cases):
+    # order-confirmation). Gated on the live win-oracle (not on any prior verdict),
+    # so a false-positive playbook can't suppress the precise purchase exploit.
+    if not dry_run and not await _lab_solved(scope, transport):
         from .flows import workflow_skip
         try:
             wfs = await workflow_skip(scope, ing.registry, transport=transport)
@@ -229,7 +271,7 @@ async def run_engagement(
 
     # 6d-ter. Infinite-money flow (gift-card arbitrage; request-heavy). Try before
     # the overflow if nothing cheaper solved the purchase yet.
-    if not dry_run and not any(c.verdict == _V.CONFIRMED_EXPLOIT for c in cases):
+    if not dry_run and not await _lab_solved(scope, transport):
         from .flows import infinite_money
         try:
             mny = await infinite_money(scope, ing.registry, transport=transport)
@@ -241,7 +283,7 @@ async def run_engagement(
 
     # 6e. Integer-overflow purchasing flow (expensive ~hundreds of requests) —
     # only as a last resort when nothing cheaper already solved the purchase.
-    if not dry_run and not any(c.verdict == _V.CONFIRMED_EXPLOIT for c in cases):
+    if not dry_run and not await _lab_solved(scope, transport):
         from .flows import integer_overflow
         try:
             ovf = await integer_overflow(scope, ing.registry, transport=transport)

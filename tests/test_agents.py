@@ -23,7 +23,9 @@ def test_base_model_is_deepseek():
 def test_fleet_assignments():
     assert _default(AgentRole.RESEARCH) == "z-ai/glm-5.1"
     assert _default(AgentRole.HYPOTHESIS) == "moonshotai/kimi-k2.6"
-    assert _default(AgentRole.CODEGEN) == "qwen/qwen3.5-397b-a17b"
+    # CODEGEN drives the autonomous agent brain — Llama-4 Maverick is the verified
+    # fast/clean codegen path on NVIDIA NIM (deepseek-v4-pro hangs on NIM, 2026-06-04).
+    assert _default(AgentRole.CODEGEN) == "meta/llama-4-maverick-17b-128e-instruct"
     assert _default(AgentRole.SUMMARIZER) == "qwen/qwen3.5-397b-a17b"
     # resolve_models() honors .env overrides — that's the intended behavior.
 
@@ -116,10 +118,15 @@ def test_codegen_and_summarizer_are_wired(monkeypatch):
     case = TestCase(test_id="TC-LLM-001", vulnerability_class=VulnClass.STATE_BYPASS,
                     hypothesis="x", risk_rating=Severity.HIGH, origin="llm",
                     steps=[TestStep(step=1, description="d", method="GET", path="/x")])
+    # Resolve the EXPECTED model from each role's spec (honors env overrides) so the
+    # test proves the right role was invoked without hard-coding a (possibly dead) id.
+    codegen_model = orch.agent(AgentRole.CODEGEN).model
+    summarizer_model = orch.agent(AgentRole.SUMMARIZER).model
+
     out = asyncio.run(orch.concretize([case]))
     assert out[0].steps[0].success_condition == "status == 200"
     assert out[0].origin == "codegen"
-    assert any(c["model"] == "qwen/qwen3.5-397b-a17b" for c in router.calls)  # CODEGEN model
+    assert any(c["model"] == codegen_model for c in router.calls)  # CODEGEN model
 
     asyncio.run(orch.summarize_results([{"class": "X", "verdict": "Y"}]))
-    assert any(c["model"] == "qwen/qwen3.5-397b-a17b" for c in router.calls)  # SUMMARIZER model
+    assert any(c["model"] == summarizer_model for c in router.calls)  # SUMMARIZER model

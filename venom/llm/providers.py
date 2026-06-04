@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import os
 import json
+import re
 import time
 import logging
 from enum import Enum
@@ -74,13 +75,19 @@ class ProviderConfig:
     requests_per_minute: int = 60
     _request_times: list[float] = field(default_factory=list, repr=False)
 
-    def check_rate_limit(self) -> None:
-        """Sliding-window rate limiter — raises if we'd exceed RPM."""
+    async def throttle(self) -> None:
+        """Proactive sliding-window throttle — SLEEPS until a slot is free so we
+        stay under the provider's RPM and avoid 429s (vital when one provider has
+        no working fallback)."""
+        import asyncio
         now = time.monotonic()
         self._request_times = [t for t in self._request_times if now - t < 60]
         if len(self._request_times) >= self.requests_per_minute:
-            wait = 60 - (now - self._request_times[0])
-            raise RuntimeError(f"[{self.provider}] Rate limit hit — retry in {wait:.1f}s")
+            wait = 60 - (now - self._request_times[0]) + 0.1
+            if wait > 0:
+                await asyncio.sleep(wait)
+            now = time.monotonic()
+            self._request_times = [t for t in self._request_times if now - t < 60]
         self._request_times.append(now)
 
 
@@ -103,7 +110,8 @@ OPENROUTER_DEFAULT = ProviderConfig(
     provider=Provider.OPENROUTER,
     api_key=os.getenv("OPENROUTER_API_KEY"),
     base_url="https://openrouter.ai/api/v1/chat/completions",
-    model="anthropic/claude-sonnet-4-6",  # Default; override per task
+    # The operator's available OpenRouter model — used as the NVIDIA fallback.
+    model=os.getenv("OPENROUTER_MODEL", "qwen/qwen3-coder:free"),
     max_tokens=4096,
     temperature=0.2,
     extra_headers={
@@ -124,7 +132,9 @@ NVIDIA_NIM_DEFAULT = ProviderConfig(
     model=os.getenv("VENOM_BASE_MODEL", "deepseek-ai/deepseek-v4-pro"),
     max_tokens=8192,
     temperature=0.2,
-    requests_per_minute=40,
+    # Conservative for NVIDIA free tier — the throttle sleeps to stay under this,
+    # avoiding 429s (override via env if you have a higher quota).
+    requests_per_minute=int(os.getenv("NVIDIA_RPM", "20")),
 )
 
 OLLAMA_DEFAULT = ProviderConfig(
@@ -132,9 +142,9 @@ OLLAMA_DEFAULT = ProviderConfig(
     api_key=None,  # No key needed for local Ollama
     base_url=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434/api/chat"),
     model=os.getenv("OLLAMA_MODEL", "llama3.1:70b"),
-    max_tokens=4096,
+    max_tokens=1024,            # bound generation length on slow local CPU inference
     temperature=0.2,
-    timeout=300.0,  # Local inference is slower
+    timeout=900.0,  # Local CPU inference is slow (minutes per call)
     requests_per_minute=20,
 )
 
@@ -143,14 +153,16 @@ OLLAMA_DEFAULT = ProviderConfig(
 # Task -> provider routing tables
 # ---------------------------------------------------------------------------
 
+# No Anthropic API in this deployment — route to the providers actually available
+# (NVIDIA NIM primary for reasoning, OpenRouter where configured, Ollama local).
 DEFAULT_ROUTING: dict[TaskType, Provider] = {
-    TaskType.RULE_INFERENCE:     Provider.ANTHROPIC,
-    TaskType.HYPOTHESIS_GEN:     Provider.ANTHROPIC,
+    TaskType.RULE_INFERENCE:     Provider.NVIDIA_NIM,
+    TaskType.HYPOTHESIS_GEN:     Provider.NVIDIA_NIM,
     TaskType.RAG_EMBEDDING:      Provider.OLLAMA,
-    TaskType.TEST_SUMMARIZATION: Provider.OPENROUTER,
-    TaskType.REPORT_GENERATION:  Provider.ANTHROPIC,
-    TaskType.CODE_GENERATION:    Provider.OPENROUTER,
-    TaskType.GRAPH_EXTRACTION:   Provider.ANTHROPIC,
+    TaskType.TEST_SUMMARIZATION: Provider.NVIDIA_NIM,
+    TaskType.REPORT_GENERATION:  Provider.NVIDIA_NIM,
+    TaskType.CODE_GENERATION:    Provider.NVIDIA_NIM,
+    TaskType.GRAPH_EXTRACTION:   Provider.NVIDIA_NIM,
 }
 
 AIR_GAP_ROUTING: dict[TaskType, Provider] = {task: Provider.OLLAMA for task in TaskType}
@@ -239,9 +251,11 @@ class LLMRouter:
         self.providers = providers
         self.routing = AIR_GAP_ROUTING if air_gap else routing
         self.air_gap = air_gap
+        # Every task type must have a path to a working provider. No Anthropic here;
+        # NVIDIA NIM leads (the reliable keyed provider), then OpenRouter, then local Ollama.
         self.fallback_chain = fallback_chain or [
-            Provider.OPENROUTER,
             Provider.NVIDIA_NIM,
+            Provider.OPENROUTER,
             Provider.OLLAMA,
         ]
         # Optional Phase-E telemetry (cache / budget / tracer). None => no-op.
@@ -264,8 +278,8 @@ class LLMRouter:
             "air_gap": AIR_GAP_ROUTING,
         }.get(mode, DEFAULT_ROUTING)
 
+        # Anthropic intentionally excluded — not available in this deployment.
         providers = {
-            Provider.ANTHROPIC: ANTHROPIC_DEFAULT,
             Provider.OPENROUTER: OPENROUTER_DEFAULT,
             Provider.NVIDIA_NIM: NVIDIA_NIM_DEFAULT,
             Provider.OLLAMA: OLLAMA_DEFAULT,
@@ -273,8 +287,7 @@ class LLMRouter:
 
         # Re-read API keys at call time (robust if .env was loaded after this
         # module was imported), then disable providers with no key (Ollama needs none).
-        env_key = {Provider.ANTHROPIC: "ANTHROPIC_API_KEY",
-                   Provider.OPENROUTER: "OPENROUTER_API_KEY",
+        env_key = {Provider.OPENROUTER: "OPENROUTER_API_KEY",
                    Provider.NVIDIA_NIM: "NVIDIA_API_KEY"}
         for p, cfg in providers.items():
             if p in env_key:
@@ -308,8 +321,14 @@ class LLMRouter:
         **kwargs,
     ) -> dict[str, Any]:
         """Route a completion request, falling back through the fallback chain."""
-        target = override_provider or self.routing.get(task, Provider.ANTHROPIC)
-        attempt_order = [target] + [p for p in self.fallback_chain if p != target]
+        if self.air_gap:
+            # Local-only: ignore any per-call provider override (e.g. an agent role
+            # pinned to NVIDIA) so nothing leaves the network and no cloud 429s.
+            target = Provider.OLLAMA
+            attempt_order = [Provider.OLLAMA]
+        else:
+            target = override_provider or self.routing.get(task, Provider.NVIDIA_NIM)
+            attempt_order = [target] + [p for p in self.fallback_chain if p != target]
 
         # --- cache: identical calls (common in agent loops) skip the provider ---
         ckey = None
@@ -337,12 +356,25 @@ class LLMRouter:
             # falling back to a different provider, drop it and use that provider's
             # own default model (otherwise the request is guaranteed to fail).
             call_kwargs = dict(kwargs)
-            if provider != target and "model" in call_kwargs:
+            # Drop a provider-specific model override when it wouldn't apply: on
+            # fallback to a different provider, or in air-gap mode (use Ollama's model).
+            if (self.air_gap or provider != target) and "model" in call_kwargs:
                 call_kwargs.pop("model")
             try:
-                cfg.check_rate_limit()
                 t0 = time.monotonic()
-                result = await self._dispatch(cfg, task, messages, system, **call_kwargs)
+                result = None
+                for rl_attempt in range(2):       # one quick same-provider 429 retry, then fail over
+                    await cfg.throttle()
+                    try:
+                        result = await self._dispatch(cfg, task, messages, system, **call_kwargs)
+                        break
+                    except httpx.HTTPStatusError as he:
+                        if he.response is not None and he.response.status_code == 429 and rl_attempt < 1:
+                            import asyncio
+                            ra = he.response.headers.get("retry-after")
+                            await asyncio.sleep(float(ra) if (ra and ra.isdigit()) else 1.5)
+                            continue
+                        raise
                 result["provider"] = provider.value
                 latency_ms = int((time.monotonic() - t0) * 1000)
                 if self.budget is not None:
@@ -404,7 +436,10 @@ class LLMRouter:
 
     # ----------------------------------------------------------------- OpenRouter
     async def _call_openrouter(self, cfg, task, messages, system, **kwargs) -> dict[str, Any]:
-        model = kwargs.get("model") or OPENROUTER_MODEL_MAP.get(task, cfg.model)
+        # Prefer the configured OpenRouter model (operator's available/free model).
+        # An explicit per-call model override (same-provider routing) still wins;
+        # on fallback from another provider the override is dropped upstream.
+        model = kwargs.get("model") or cfg.model or OPENROUTER_MODEL_MAP.get(task)
         headers = {"Authorization": f"Bearer {cfg.api_key}", "Content-Type": "application/json", **cfg.extra_headers}
         msgs = ([{"role": "system", "content": system}] if system else []) + messages
         payload = {
@@ -445,7 +480,7 @@ class LLMRouter:
             data = resp.json()
         usage = data.get("usage", {})
         return {
-            "content": data["choices"][0]["message"]["content"],
+            "content": _extract_message_text(data),
             "model": data.get("model", cfg.model),
             "input_tokens": usage.get("prompt_tokens", 0),
             "output_tokens": usage.get("completion_tokens", 0),
@@ -462,6 +497,10 @@ class LLMRouter:
             "options": {
                 "temperature": kwargs.get("temperature", cfg.temperature),
                 "num_predict": kwargs.get("max_tokens", cfg.max_tokens),
+                # Ollama defaults to a 2048-token window, which silently TRUNCATES
+                # the recon brief — the model then can't see the endpoints/snippets
+                # and invents paths. Give it room to actually read the prompt.
+                "num_ctx": int(os.getenv("OLLAMA_NUM_CTX", "8192")),
             },
         }
         async with httpx.AsyncClient(timeout=cfg.timeout) as client:
@@ -481,6 +520,23 @@ class LLMRouter:
 # Structured output helper
 # ---------------------------------------------------------------------------
 
+def _extract_message_text(data: dict) -> str:
+    """Pull the assistant text from an OpenAI-compatible response, tolerant of
+    reasoning models: prefer `content`, fall back to `reasoning_content`, and
+    finally to a tool_call's JSON arguments. Avoids KeyErrors on odd shapes."""
+    choices = data.get("choices") or [{}]
+    msg = choices[0].get("message", {}) or {}
+    content = msg.get("content")
+    if content:
+        return content
+    tool_calls = msg.get("tool_calls") or []
+    if tool_calls:
+        fn = (tool_calls[0] or {}).get("function", {})
+        if fn.get("arguments"):
+            return fn["arguments"]
+    return msg.get("reasoning_content") or ""
+
+
 async def complete_json(
     router: LLMRouter,
     task: TaskType,
@@ -499,11 +555,52 @@ async def complete_json(
         augmented[-1] = {**augmented[-1], "content": augmented[-1]["content"] + json_instruction}
 
     result = await router.complete(task, augmented, system, **kwargs)
-    raw_text = result["content"].strip()
-    if raw_text.startswith("```"):
-        raw_text = raw_text.split("\n", 1)[-1].rsplit("```", 1)[0]
-    result["parsed"] = json.loads(raw_text)
+    result["parsed"] = _loads_lenient(result["content"])
     return result
+
+
+def _first_json_object(text: str) -> str | None:
+    """Return the first balanced {...} object in text, honoring quoted strings."""
+    start = text.find("{")
+    if start < 0:
+        return None
+    depth, in_str, esc = 0, False, False
+    for i in range(start, len(text)):
+        ch = text[i]
+        if in_str:
+            if esc:
+                esc = False
+            elif ch == "\\":
+                esc = True
+            elif ch == '"':
+                in_str = False
+        elif ch == '"':
+            in_str = True
+        elif ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                return text[start:i + 1]
+    return None
+
+
+def _loads_lenient(content: str) -> dict[str, Any]:
+    """Parse a JSON object from an LLM response that may include code fences,
+    surrounding prose, or trailing commas — common, non-fatal model quirks."""
+    raw = (content or "").strip()
+    if raw.startswith("```"):
+        raw = raw.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
+    candidates = [raw, _first_json_object(raw)]
+    for cand in candidates:
+        if not cand:
+            continue
+        for attempt in (cand, re.sub(r",\s*([}\]])", r"\1", cand)):   # also drop trailing commas
+            try:
+                return json.loads(attempt)
+            except json.JSONDecodeError:
+                continue
+    raise json.JSONDecodeError(f"no parseable JSON object in response: {raw[:160]!r}", raw, 0)
 
 
 # ---------------------------------------------------------------------------

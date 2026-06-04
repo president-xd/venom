@@ -33,11 +33,10 @@ _ID_PARAMS = ("id", "user", "userid", "user_id", "account", "accountid", "accoun
 _PRIV_PATH = ("admin", "internal", "manage", "management", "staff", "moderator",
               "dashboard", "config", "settings", "roles", "permissions")
 _SUCCESS = "['confirmed', 'order placed', 'order is', 'success', 'thank you', 'added to', 'updated']"
-# Generic "winning state" signals: a placed order, or a PortSwigger lab solved banner
-# (the storefront renders class "is-solved" / "Congratulations, you solved the lab!").
+# The CONFIRMING signal must be the genuine win state, NOT a generic "order placed"
+# (any cheap order says that → false positive). Only the real solved/win banner counts.
 SOLVED = ("status == 200 and ('is-solved' in text or 'congratulations' in text.lower() "
-          "or 'solved the lab' in text.lower() or 'order placed' in text.lower() "
-          "or 'order confirmed' in text.lower())")
+          "or 'solved the lab' in text.lower())")
 # CSRF scrape pattern tolerant of quoted/unquoted values.
 _CSRF_RE = r'name=["\']?csrf["\']?[^>]*?value=["\']?([^"\'\s>]+)'
 
@@ -102,14 +101,11 @@ def purchase_flow(registry: EndpointRegistry, identities) -> list[TestCase]:
         steps.append(TestStep(step=next(n), description="View cart, scrape checkout CSRF",
                               method="GET", path=cart_action, identity=attacker,
                               extract_regex={"ck_csrf": _CSRF_RE}))
-        # (4) Place the order.
+        # (4) Place the order. (No verdict here — a placed order is not proof of the
+        #     objective; only the genuine solved-state below confirms.)
         steps.append(TestStep(step=next(n), description="Checkout (place order)",
                               method="POST", path=checkout_path, identity=attacker,
-                              form={"csrf": "{ck_csrf}"}, follow_redirects=True,
-                              success_condition=("status in (200, 302) and ("
-                                                 "'order placed' in text.lower() or "
-                                                 "'order confirmed' in text.lower() or "
-                                                 "'is-solved' in text)")))
+                              form={"csrf": "{ck_csrf}"}, follow_redirects=True))
         # (5) Re-check the storefront for the winning/solved state.
         steps.append(TestStep(step=next(n), description="Confirm order / lab-solved state",
                               method="GET", path="/", identity=attacker,
@@ -203,9 +199,7 @@ def cart_balancing(registry: EndpointRegistry, identities) -> list[TestCase]:
                               extract_regex={"ck_csrf": _CSRF_RE}))
         steps.append(TestStep(step=next(n), description="Checkout (place order)",
                               method="POST", path=checkout_path, identity=attacker,
-                              form={"csrf": "{ck_csrf}"}, follow_redirects=True,
-                              success_condition=("status in (200, 302) and ('order placed' in text.lower() "
-                                                 "or 'order confirmed' in text.lower() or 'is-solved' in text)")))
+                              form={"csrf": "{ck_csrf}"}, follow_redirects=True))
         steps.append(TestStep(step=next(n), description="Confirm order / lab-solved state",
                               method="GET", path="/", identity=attacker, success_condition=SOLVED))
 

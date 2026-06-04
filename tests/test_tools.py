@@ -76,3 +76,32 @@ def test_tool_objective_and_scope_guard():
         finally:
             await tb.aclose()
     asyncio.run(go())
+
+
+def test_objective_does_not_rely_on_baked_in_lab_strings():
+    """Enterprise oracle: with NO operator-defined win (no win_action, no signals),
+    the objective is never auto-confirmed — even on a page literally containing the
+    PortSwigger 'is-solved' banner. Success must be differential or operator-defined."""
+    def _mock_solved():
+        def handler(req):
+            return httpx.Response(200, headers={"content-type": "text/html"},
+                                  text="<html><body><div class='is-solved'>Congratulations, "
+                                       "you solved the lab!</div></body></html>")
+        return httpx.MockTransport(handler)
+
+    async def go():
+        # Default Objective: no win_action, no win_signals -> cannot confirm.
+        tb = Toolbox(_scope(), Notebook(), transport=_mock_solved(), objective=Objective(win_url="/"))
+        try:
+            assert (await tb.check_objective()).data["met"] is False, \
+                "objective wrongly confirmed from a baked-in lab banner"
+        finally:
+            await tb.aclose()
+        # Only when the operator EXPLICITLY defines the marker does it confirm.
+        tb2 = Toolbox(_scope(), Notebook(), transport=_mock_solved(),
+                      objective=Objective(win_url="/", win_signals=("is-solved",)))
+        try:
+            assert (await tb2.check_objective()).data["met"] is True
+        finally:
+            await tb2.aclose()
+    asyncio.run(go())

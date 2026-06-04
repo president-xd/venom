@@ -129,10 +129,14 @@ BUSINESS_LOGIC_KB: list[dict] = [
     {
         "id": "email-parser-discrepancy",
         "name": "Email address parser discrepancies",
-        "signals": ["domain-restricted signup/verification", "email normalization"],
-        "probe": "Use encoding/sub-addressing tricks so the validator and mailer disagree.",
-        "exploit": "Bypass domain allow-lists to register/verify as a privileged domain.",
-        "refs": ["PortSwigger: email parser discrepancies"],
+        "signals": ["domain-restricted signup/verification (only @company allowed)",
+                    "validator accepts RFC 2047 encoded-words in the email"],
+        "probe": "Keep the literal domain @company (validator passes) but put an encoded-word "
+                 "local part the MAILER decodes+re-parses; check if mail reaches your inbox.",
+        "exploit": "UTF-7 atom split: =?utf-7?q?you&AEA-<your-inbox>&ACA-?=@company — validator "
+                   "reads @company, mailer decodes '@'(&AEA-)+space(&ACA-) and delivers to your "
+                   "inbox, so you register a privileged @company account you actually control.",
+        "refs": ["PortSwigger: email parser discrepancies", "Splitting the email atom (Gareth Heyes)"],
     },
     {
         "id": "exceptional-input-truncation",
@@ -178,9 +182,38 @@ BUSINESS_LOGIC_KB: list[dict] = [
 ]
 
 
-def kb_prompt(limit: int | None = None) -> str:
-    """Compact, token-cheap rendering of the KB for an LLM reasoning prompt."""
-    items = BUSINESS_LOGIC_KB[: limit or len(BUSINESS_LOGIC_KB)]
+import re as _re
+
+_TOK = _re.compile(r"[a-z0-9]+")
+
+
+def _tokens(text: str) -> set[str]:
+    return {t for t in _TOK.findall((text or "").lower()) if len(t) > 2}
+
+
+def rank_kb(surface: str, top: int = 6) -> list[dict]:
+    """Rank KB priors by overlap with the observed surface — so the prompt is
+    STEERED toward what the target actually exposes instead of dumping all classes
+    (which makes weak models anchor on the wrong one)."""
+    q = _tokens(surface)
+    if not q:
+        return list(BUSINESS_LOGIC_KB)[:top]
+    scored = []
+    for k in BUSINESS_LOGIC_KB:
+        hay = _tokens(" ".join(k["signals"]) + " " + k["name"] + " " + k.get("probe", "") +
+                      " " + k.get("exploit", ""))
+        scored.append((len(q & hay), k))
+    scored.sort(key=lambda x: x[0], reverse=True)
+    return [k for _, k in scored[:top]]
+
+
+def kb_prompt(limit: int | None = None, surface: str = "") -> str:
+    """Compact KB rendering for an LLM prompt. With `surface`, only the most
+    relevant priors are included (ranked), keeping the prompt focused and cheap."""
+    if surface:
+        items = rank_kb(surface, top=limit or 6)
+    else:
+        items = BUSINESS_LOGIC_KB[: limit or len(BUSINESS_LOGIC_KB)]
     lines = []
     for k in items:
         lines.append(f"- {k['id']} ({k['name']}): signals={'; '.join(k['signals'])}. "

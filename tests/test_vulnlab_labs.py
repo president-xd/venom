@@ -16,7 +16,8 @@ import httpx
 import pytest
 
 from vulnlab.app import make_transport, new_state
-from vulnlab.labs import LABS, SOLVED_KEYS, PIN, ADMIN_TOKEN, ADMIN_API_KEY
+from vulnlab.labs import (LABS, SOLVED_KEYS, PIN, ADMIN_TOKEN, ADMIN_API_KEY,
+                          ADMIN_INVITE, STAFF_PIN)
 
 BASE = "http://vuln.local"
 
@@ -36,7 +37,7 @@ def test_fresh_state_has_nothing_solved():
     _, state = client()
     assert state["solved"] == {k: False for k in SOLVED_KEYS}
     assert set(SOLVED_KEYS) == {lab.solved_key for lab in LABS}
-    assert len(LABS) == 15
+    assert len(LABS) == 26
 
 
 def test_registry_metadata_is_complete():
@@ -280,6 +281,179 @@ def test_refund_legit_amount_cannot_afford():
     assert state["solved"]["refund"] is False
 
 
+# --------------------------------------------------------------- enterprise II
+def test_bank_trusted_from_account():
+    c, state = client()
+    login(c)
+    c.post("/bank/transfer", data={"from_account": "TREASURY-OPS",
+                                    "to_account": "wiener", "amount": "100000"})
+    assert state["solved"]["bank"] is True
+
+
+def test_bank_own_account_cannot_reach_target():
+    c, state = client()
+    login(c)
+    c.post("/bank/transfer", data={"from_account": "wiener", "to_account": "x", "amount": "10"})
+    assert state["solved"]["bank"] is False
+
+
+def test_tenant_cross_org_invite_leak():
+    c, state = client()
+    members = c.get("/workspace/api/members", params={"org": "7"}).json()   # other tenant
+    assert members["admin_invite"] == ADMIN_INVITE
+    c.post("/workspace/api/remove-user", data={"user": "carlos"},
+           headers={"X-Invite-Token": members["admin_invite"]})
+    assert state["solved"]["tenant"] is True
+
+
+def test_tenant_no_token_denied():
+    c, state = client()
+    r = c.post("/workspace/api/remove-user", data={"user": "carlos"})
+    assert r.status_code == 403 and state["solved"]["tenant"] is False
+
+
+def test_scope_param_escalation():
+    c, state = client()
+    c.post("/devapi/users/delete", data={"username": "carlos", "scope": "admin"},
+           headers={"X-Api-Key": "sk_live_reader"})
+    assert state["solved"]["scope"] is True
+
+
+def test_scope_read_only_denied():
+    c, state = client()
+    r = c.post("/devapi/users/delete", data={"username": "carlos", "scope": "read"},
+               headers={"X-Api-Key": "sk_live_reader"})
+    assert r.status_code == 403 and state["solved"]["scope"] is False
+
+
+def test_billing_proration_abuse():
+    c, state = client()
+    login(c)
+    c.post("/billing/change", data={"plan": "premium"})
+    c.post("/billing/change", data={"plan": "free"})       # +100 credit (never paid)
+    c.post("/billing/buy-premium")
+    assert state["solved"]["billing"] is True
+
+
+def test_billing_cannot_buy_without_abuse():
+    c, state = client()
+    login(c)
+    c.post("/billing/buy-premium")                          # only 20 credit
+    assert state["solved"]["billing"] is False
+
+
+def test_loyalty_cancel_keeps_points():
+    c, state = client()
+    login(c)
+    for _ in range(3):                                      # 100 +3*60 = 280 >= 250
+        c.post("/loyalty/order")
+        c.post("/loyalty/cancel")
+    c.post("/loyalty/upgrade")
+    assert state["solved"]["loyalty"] is True
+
+
+def test_loyalty_single_order_insufficient():
+    c, state = client()
+    login(c)
+    c.post("/loyalty/order")                                # 160 < 250
+    c.post("/loyalty/upgrade")
+    assert state["solved"]["loyalty"] is False
+
+
+def test_invoice_pay_without_approval():
+    c, state = client()
+    login(c)
+    body = c.post("/ap/create", data={"amount": "50000", "payee": "wiener"}).text
+    iid = re.search(r"(INV-\d+)", body).group(1)
+    c.post("/ap/pay", data={"invoice_id": iid})            # paid despite approved=False
+    assert state["solved"]["invoice"] is True
+
+
+def test_invoice_small_approved_not_a_win():
+    c, state = client()
+    login(c)
+    body = c.post("/ap/create", data={"amount": "500", "payee": "wiener"}).text
+    iid = re.search(r"(INV-\d+)", body).group(1)
+    c.post("/ap/pay", data={"invoice_id": iid})            # approved (<=1000) -> not the flaw
+    assert state["solved"]["invoice"] is False
+
+
+def test_twofa_trust_device_bypass():
+    c, state = client()
+    login(c)
+    c.post("/secure/trust-device")                         # satisfies 2FA with no OTP
+    c.post("/secure/wire", data={"amount": "1"})
+    assert state["solved"]["twofa"] is True
+
+
+def test_twofa_wire_denied_without_2fa():
+    c, state = client()
+    login(c)
+    r = c.post("/secure/wire", data={"amount": "1"})
+    assert r.status_code == 403 and state["solved"]["twofa"] is False
+
+
+def test_records_bola_staff_pin_leak():
+    c, state = client()
+    rec = c.get("/clinic/api/record", params={"mrn": "1000"}).json()   # admin's record
+    assert rec["staff_pin"] == STAFF_PIN
+    c.post("/clinic/api/discharge", data={"patient": "carlos"},
+           headers={"X-Staff-Pin": rec["staff_pin"]})
+    assert state["solved"]["records"] is True
+
+
+def test_records_no_pin_denied():
+    c, state = client()
+    r = c.post("/clinic/api/discharge", data={"patient": "carlos"})
+    assert r.status_code == 403 and state["solved"]["records"] is False
+
+
+def test_files_permission_escalation():
+    c, state = client()
+    login(c)
+    c.post("/drive/share", data={"file": "Q4-Board-Deck", "role": "owner"})
+    c.post("/drive/delete", data={"file": "Q4-Board-Deck"})
+    assert state["solved"]["files"] is True
+
+
+def test_files_viewer_cannot_delete():
+    c, state = client()
+    login(c)
+    r = c.post("/drive/delete", data={"file": "Q4-Board-Deck"})   # still viewer
+    assert r.status_code == 403 and state["solved"]["files"] is False
+
+
+def test_deploy_production_bfla():
+    c, state = client()
+    login(c)
+    c.post("/ci/deploy", data={"service": "payments-api", "env": "production"})
+    assert state["solved"]["deploy"] is True
+
+
+def test_deploy_staging_not_a_win():
+    c, state = client()
+    login(c)
+    c.post("/ci/deploy", data={"service": "payments-api", "env": "staging"})
+    assert state["solved"]["deploy"] is False
+
+
+def test_referral_self_referral():
+    c, state = client()
+    login(c)
+    for _ in range(5):                                      # 5*10 = 50 >= 50
+        c.post("/refer/use", data={"code": "WIENER10"})
+    c.post("/refer/claim")
+    assert state["solved"]["referral"] is True
+
+
+def test_referral_single_use_insufficient():
+    c, state = client()
+    login(c)
+    c.post("/refer/use", data={"code": "WIENER10"})         # 10 < 50
+    c.post("/refer/claim")
+    assert state["solved"]["referral"] is False
+
+
 # --------------------------------------------------------------------- coverage
 @pytest.mark.parametrize("key", SOLVED_KEYS)
 def test_every_lab_has_an_exploit_proof(key):
@@ -288,5 +462,7 @@ def test_every_lab_has_an_exploit_proof(key):
         "price", "idor", "coupon", "pin", "mass", "negqty",
         "workflow", "trustid", "io", "money", "reg",
         "jwt", "bola", "reset", "refund",
+        "bank", "tenant", "scope", "billing", "loyalty", "invoice",
+        "twofa", "records", "files", "deploy", "referral",
     }
     assert key in proven, f"lab '{key}' has no exploit proof"

@@ -37,6 +37,16 @@ def handle(state: dict, method: str, path: str, query: str, cookies: dict, form:
     sid = cookies.get("session")
     sess = state["sessions"].get(sid)
 
+    # ---- harness-only state reset (NOT a lab; lets the eval give each lab a clean
+    #      server so a persistent process can't report a stale/inflated win) ----
+    if path == "/__reset" and method == "POST":
+        for k in [k for k in state if k != "n"]:
+            state.pop(k, None)
+        state["sessions"] = {}
+        state["users"] = default_users()
+        state["solved"] = {k: False for k in SOLVED_KEYS}
+        return 200, _page("reset"), None
+
     # ---- shared auth (multi-user table; supports account-takeover labs) ----
     if path == "/login" and method == "GET":
         return 200, _page("<form action=/login method=POST>"

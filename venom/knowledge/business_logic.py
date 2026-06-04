@@ -88,10 +88,63 @@ BUSINESS_LOGIC_KB: list[dict] = [
     {
         "id": "idor-bola",
         "name": "Broken object-level authorization (IDOR/BOLA)",
-        "signals": ["object id/username in URL, query, or body", "per-user resources"],
-        "probe": "Swap your object id/username for another user's and request it.",
-        "exploit": "Read/modify another tenant's order, account, invoice, or wallet.",
+        "signals": ["object id/username in URL, query, or body (e.g. ?id=2)",
+                    "per-user resources; sequential or guessable identifiers"],
+        "probe": "Swap your object id/username for another user's (try id=1, id=administrator) "
+                 "and request it; read the FULL response body for fields you shouldn't see.",
+        "exploit": "Request another user's object (e.g. GET /api/account?id=1 — pass it via "
+                   "params={'id':'1'}, NOT data). Their response often leaks a secret "
+                   "(api_key, token, reset code): extract() it from the response text and reuse it "
+                   "in the privileged action (header or body) to act as them.",
         "refs": ["OWASP API1:2023"],
+    },
+    {
+        "id": "secret-in-response",
+        "name": "Sensitive value disclosed in a response, then reused",
+        "signals": ["a token / api_key / reset code / OTP echoed in an HTTP response or JSON",
+                    "a 'debug' field, an account/profile read, a password-reset request"],
+        "probe": "Read the body of every step; password-reset/request and account reads often "
+                 "DISCLOSE the secret that a later step trusts.",
+        "exploit": "extract() the disclosed token from the response, then submit it to the "
+                   "confirm/use endpoint (e.g. POST /reset/confirm with the leaked token to set a "
+                   "victim's password), then login() as the victim and use their privileges.",
+        "refs": ["OWASP API3:2023 (Excessive Data Exposure)", "WSTG-ATHN-09"],
+    },
+    {
+        "id": "jwt-alg-none",
+        "name": "JWT algorithm confusion / unsecured 'none' token",
+        "signals": ["auth via a JSON Web Token in an Authorization: Bearer header or a cookie",
+                    "JWT claims include role/user/admin"],
+        "probe": "Decode the JWT (base64url of header.payload.sig). Forge a NEW token whose "
+                 "header alg is 'none' (no signature) with your desired claims.",
+        "exploit": "Build header={'alg':'none','typ':'JWT'}, payload with role=administrator, "
+                   "join base64url(header)+'.'+base64url(payload)+'.' (empty signature), and send it "
+                   "as Authorization: Bearer <token>. Servers that honor alg:none accept the unsigned, "
+                   "attacker-controlled claims. (Do NOT need the HS256 secret.)",
+        "refs": ["OWASP API2:2023", "PortSwigger: JWT attacks (alg:none)"],
+    },
+    {
+        "id": "missing-rate-limit",
+        "name": "Missing rate limit / lockout on a short secret (brute force)",
+        "signals": ["a short secret gates an action: 4-digit PIN, OTP, 2FA code, voucher",
+                    "no lockout / no attempt counter mentioned"],
+        "probe": "Submit a couple of wrong values — if there is no lockout, the field is brute-able.",
+        "exploit": "Loop over the full keyspace (e.g. for n in range(10000): pin=str(n).zfill(4)) "
+                   "calling the verify endpoint until the response indicates success, then proceed "
+                   "to the gated privileged action in the SAME session.",
+        "refs": ["OWASP API4:2023", "WSTG-ATHN-03"],
+    },
+    {
+        "id": "integer-overflow",
+        "name": "Integer overflow / wraparound on a total or balance",
+        "signals": ["a total computed as price*quantity (or sum) with no upper bound",
+                    "the server echoes the computed total; large inputs accepted"],
+        "probe": "Send a large quantity and read the echoed total — if it goes negative or tiny, "
+                 "the total wraps a fixed-width integer.",
+        "exploit": "Find a quantity that wraps the total into an affordable/zero/negative value: use "
+                   "the pre-imported find_overflow_qty(price) (searches qty where price*qty wraps a "
+                   "32-bit int into [0,100]), then buy with that quantity.",
+        "refs": ["PortSwigger: Failing to handle unconventional input", "WSTG-BUSL-01"],
     },
     {
         "id": "bfla-access-control",

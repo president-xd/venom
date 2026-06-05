@@ -15,6 +15,8 @@ from .agent_brain import make_agent_brain
 from .objective import Objective
 from .evaluate import success_rate, RunStats
 from .oneshot import oneshot_hunt, make_oneshot_synthesizer, build_brief
+from .campaign import run_campaign, derive_objectives, CampaignResult
 
 __all__ = ["Agent", "make_agent_brain", "Objective", "success_rate", "RunStats",
-           "oneshot_hunt", "make_oneshot_synthesizer", "build_brief"]
+           "oneshot_hunt", "make_oneshot_synthesizer", "build_brief",
+           "run_campaign", "derive_objectives", "CampaignResult"]

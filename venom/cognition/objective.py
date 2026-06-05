@@ -65,6 +65,34 @@ class Objective:
         ok, _ = await self._run_win_action(toolbox)
         return ok
 
+    def action_succeeded_in_trace(self, trace: list[dict] | None) -> bool:
+        """True if the EXPLOIT itself already performed the win action successfully.
+
+        Re-running a bare win_action only proves SESSION-state escalation (role/2FA/
+        cookie). When the privilege is carried IN the winning request — e.g. a stolen
+        token/api-key in the body or header of a BOLA delete — the bare re-run is
+        denied even though the exploit succeeded. So we also accept the win if the
+        exploit's own request trace shows the win-action path returning success (and,
+        when defined, the operator's success_text). Still a sound differential: the
+        action is denied to the un-escalated user (baseline) yet the exploit achieved
+        it. success_text is REQUIRED here to avoid counting an incidental 200."""
+        a = self.win_action or {}
+        if not a or not self.success_text:
+            return False
+        want_method = (a.get("method") or "GET").upper()
+        want_path = (a.get("path") or self.win_url or "").rstrip("/") or "/"
+        needle = self.success_text.lower()
+        for t in (trace or []):
+            if (t.get("method") or "").upper() != want_method:
+                continue
+            if ((t.get("path") or "").rstrip("/") or "/") != want_path:
+                continue
+            if t.get("status") not in self.success_status:
+                continue
+            if needle in (t.get("snippet") or "").lower():
+                return True
+        return False
+
     async def check(self, toolbox) -> bool:
         """True if the objective is currently met.
 

@@ -42,67 +42,145 @@ Every outbound request passes through `Scope.assert_request_allowed()` and a
 token-bucket rate limiter, and carries `X-Pentest-ID: <engagement_id>` so the
 target's blue team can filter test traffic.
 
-## Reasoning mode (`--think`) — beyond playbooks
+## Autonomous reasoning engine — beyond playbooks
 
 Playbooks are fast and deterministic, but they can only do what's coded. For
-flaws nobody pre-wrote, VENOM has an **adaptive reasoning loop**
-([`venom/cognition/`](venom/cognition/)):
+flaws nobody pre-wrote, VENOM has an **autonomous engine**
+([`venom/cognition/`](venom/cognition/)) that writes and runs **real exploit
+code** against the discovered surface. Two entry points share the same machinery:
+
+- **`oneshot`** — LLM-frugal (default ≤3 model calls): recon → one synthesis →
+  sandboxed exploit → verify. Built to survive rate-limited or slow models.
+- **`hunt`** — the iterative agent loop: observe → act → read the real response →
+  re-think, one step at a time, with backtracking and call caps.
 
 ```
-observe → cheap PROBE → read the real response → RE-THINK → EXPLOIT → VERIFY
+observe → recon (accessible / denied map + auto-loot) → SYNTHESIZE exploit → run in sandbox → VERIFY
 ```
 
-The LLM is given the discovered surface plus a **business-logic knowledge base**
-([`venom/knowledge/`](venom/knowledge/), 12 classes from OWASP WSTG + PortSwigger)
-as *priors*, and decides one action at a time — preferring to learn before it
-strikes. The decision "brain" is pluggable (LLM in production, deterministic stub
-in tests), so the loop mechanics are verified independently of any model
-(`tests/test_cognition.py`).
+**Active recon / auto-loot.** Before synthesis, VENOM probes the surface as the
+current user and builds the senior-tester *accessible / denied* map. It also
+**enumerates object-id parameters** (e.g. `?id=`, `?mrn=`, `?org=`) with a small
+privileged-value sweep and **harvests any secrets** a BOLA/IDOR read leaks
+(tokens, api-keys, pins, invites), surfacing them — together with the exact custom
+auth header named on the page — so the exploit can reuse them directly instead of
+re-deriving them. This is read-only reconnaissance; the privileged action that
+meets the objective is still the exploit's job.
+
+The model is given the discovered surface plus a **business-logic knowledge base**
+([`venom/knowledge/`](venom/knowledge/), 20 classes from OWASP WSTG, the OWASP API
+Top-10, and PortSwigger) as *priors*, **ranked to the target** so it anchors on
+what the app actually exposes. It then emits a fenced `async def exploit(http): …`
+block (fenced code, not JSON-embedded — far more reliable for smaller models).
+
+**Sandboxed, action-grounded execution.** Agent-authored code runs in a guarded
+sandbox ([`venom/tools/base.py`](venom/tools/base.py)): AST-validated, restricted
+builtins with a **pure-stdlib import whitelist** (no `os`/`sys`/`subprocess`/
+`socket`), a hard wall-clock timeout, and **action grounding** — any call to an
+endpoint that was *not* discovered during recon is refused, so the model cannot
+hallucinate paths. The exploit is handed ready-made helpers: `login()` for
+in-session re-authentication, and technique primitives (`extract`,
+`find_overflow_qty`, `modinv`, `brute`) from
+[`venom/tools/exploit_kit.py`](venom/tools/exploit_kit.py). Every failed attempt
+feeds back the **real HTTP responses it observed**, so retries are directed rather
+than blind.
 
 ```bash
-venom run --scope scope.json --crawl --think --live
+venom oneshot https://app.example.com --objective "…"   # frugal (≤3 calls)
+venom hunt    https://app.example.com                   # iterative agent
 ```
 
 All LLM input is **budget-trimmed** ([`venom/llm/budget.py`](venom/llm/budget.py))
 and HTML is compacted to its form/link/text skeleton, so VENOM stays within
 free-tier context limits.
 
-> Honest scope: the reasoning loop *architecture* is tested and proven; whether it
-> cracks a given novel flaw depends on the LLM. Playbooks remain the reliable path
-> for known classes, and both run together.
+> Honest scope: the engine *architecture* — recon depth, action grounding, the
+> sandbox, and the success oracle — is fully tested and proven. Whether it cracks a
+> given novel flaw still depends on the model's reasoning. Playbooks remain the
+> reliable path for known classes, and both run together.
+
+## How "success" is decided — the differential oracle
+
+Real business-logic wins are *state transitions*, not success banners. VENOM's
+oracle ([`venom/cognition/objective.py`](venom/cognition/objective.py)) decides a
+win in strict priority:
+
+1. **Differential (preferred, app-agnostic):** a concrete win action that is
+   **denied** for the un-escalated user (baseline) and **succeeds** after the
+   exploit — no product-specific string required. (When the privilege is carried
+   *in* the winning request — e.g. a stolen token in a BOLA delete — the oracle
+   also accepts the win action succeeding inside the exploit's own request trace,
+   still gated on the baseline having been denied.)
+2. **Operator-defined marker:** a `success_text` / `win_signals` substring, active
+   **only** when the operator explicitly sets it.
+3. **Neither → an honest "unknown"** (`False`). VENOM never infers success from a
+   baked-in banner, so results carry over to real enterprise apps that have none.
+
+## VulnLab — the built-in proving ground
+
+VENOM ships [`vulnlab/`](vulnlab/): one deliberately-vulnerable application
+exposing **37 independent business-logic labs** (easy → hard), modelled on real
+surfaces — e-commerce checkout, online banking, multi-tenant SaaS, an API
+platform, SaaS billing, airline loyalty, accounts-payable, 2FA, a healthcare
+portal, cloud file-sharing, CI/CD, referrals, a GraphQL API, a legacy
+cookie-identity portal, ERP expense approval, FX/wallet, an IAM console, payment
+receipts, a batch API, licensing, network-trust headers, and usage metering.
+Each lab's `solved` flag flips
+**only** on the genuine exploit (no fake banners), and every lab carries a
+human-authored solving exploit **and** a negative test in
+`tests/test_vulnlab_labs.py` — the ground truth the autonomous engine is measured
+against.
+
+The same pure handler is exposed two ways: an in-process `httpx.MockTransport`
+(deterministic tests, no network) and a real `http.server` (Docker / live hunts).
+Drive the model against the labs and print a per-lab scorecard:
+
+```bash
+python -m vulnlab.app                       # serve the labs on :8000
+python scripts/eval_vulnlab.py              # recon → oneshot → verify, every lab
+python scripts/eval_vulnlab.py price jwt bank   # a named subset
+```
 
 ## Multi-agent fleet
 
-The reasoning stages are driven by a fleet of agents, each backed by the model
-best matched to its job — all served through a **single NVIDIA NIM key**, with
-**DeepSeek as the base model**:
+The reasoning stages are driven by a fleet of agents. By default they all run on
+the **DeepSeek** API (paid, OpenAI-compatible) — `deepseek-chat` (V3) is fast and
+strong at code synthesis:
 
-| Agent | Model | Job |
-|-------|-------|-----|
-| **Orchestrator** (main) | `deepseek-ai/deepseek-v4-pro` | Planning, business-model synthesis, coordination |
-| **Research** | `z-ai/glm-5.1` | Domain-doc analysis, similar-vuln recall |
-| **Hypothesis** | `moonshotai/kimi-k2.6` | Adversarial attack-chain generation (5 lenses) |
-| **CodeGen** | `qwen/qwen3.5-397b-a17b` | Concrete test steps / payloads |
-| **Summarizer** | `qwen/qwen3.5-397b-a17b` | Cheap, high-volume result summaries |
-| **Reporter** | `deepseek-ai/deepseek-v4-pro` | Final report prose |
+| Agent | Default model | Job |
+|-------|---------------|-----|
+| **Orchestrator** (main) | `deepseek-chat` | Planning, business-model synthesis, coordination |
+| **Research** | `deepseek-chat` | Domain-doc analysis, similar-vuln recall |
+| **Hypothesis** | `deepseek-chat` | Adversarial attack-chain generation (5 lenses) |
+| **CodeGen** | `deepseek-chat` | Synthesize concrete exploit code (drives `oneshot`) |
+| **Summarizer** | `deepseek-chat` | Cheap, high-volume result summaries |
+| **Reporter** | `deepseek-chat` | Final report prose |
 
 **Where to select models:** in `.env`, via `VENOM_MODEL_<ROLE>` (see
-`.env.template`). `venom agents` prints the live mapping; `venom agents --ping`
-tests each model. If no NVIDIA key is set, VENOM drops to the deterministic
-**offline** pipeline automatically.
+`.env.template`). Upgrade reasoning-heavy roles to `deepseek-reasoner` (R1) for
+deeper (slower) reasoning. `venom agents` prints the live mapping. If no provider
+key is set and air-gap is off, VENOM drops to the deterministic **offline**
+pipeline automatically.
+
+The router also supports **NVIDIA NIM**, **OpenRouter**, and **local / cloud
+Ollama** models (e.g. `gemma4:31b`, `qwen2.5-coder`) as automatic fallbacks
+(DeepSeek → NVIDIA → OpenRouter → Ollama). Set `LLM_AIR_GAP=true` to force
+Ollama-only for air-gapped engagements.
 
 ## Install
 
 ```powershell
-cd D:\VENOM
+cd D:\MANTIS
 py -m venv .venv; .\.venv\Scripts\Activate.ps1
 pip install -e .
 copy .env.template .env   # then edit .env (optional — runs offline without keys)
 ```
 
 No LLM keys? VENOM runs in **offline mode**: deterministic playbook generation
-and a heuristic business model. Add an `ANTHROPIC_API_KEY` (or OpenRouter / NVIDIA
-/ local Ollama) to enable LLM rule inference and adversarial hypotheses.
+and a heuristic business model. Add a `DEEPSEEK_API_KEY` (the paid primary; or
+`NVIDIA_API_KEY` / `OPENROUTER_API_KEY`, or a local/cloud Ollama endpoint) to
+enable LLM rule inference, adversarial hypotheses, and the autonomous
+`oneshot` / `hunt` engine.
 
 ## Usage
 
@@ -124,12 +202,36 @@ venom run --scope examples\scope.json --in examples\ --out venom_data\reports\en
 
 # 5. Execute for real (only inside the authorized window; guard still applies)
 venom run --scope examples\scope.json --in examples\ --live
+
+# 6. Autonomous engine against a live, authorized URL (URL is positional)
+venom oneshot https://app.example.com --objective "delete another user's account"
+venom hunt    https://app.example.com --login wiener:peter   # iterative agent loop
 ```
 
 Outputs land in the `--out` directory:
 - `report.md` — executive summary, scope, findings, full test appendix
 - `findings.json` — machine-readable findings + every test case
 - `business_model.json` — the reconstructed entity/transition/rule/actor graph
+
+## Web console
+
+A local web UI over the real engine — the same scope guard, engine and findings,
+in a browser. Launching an engagement runs a **real**, scope-guarded
+`run_engagement` **in-process against the bundled VulnLab** (no LLM key, no
+network and no separate target required); the live agent trace streams over SSE
+and the Findings/Report screens render the actual `findings.json` it produces.
+
+```powershell
+venom web --open                 # serves http://127.0.0.1:8080 and opens a browser
+venom web --host 0.0.0.0 --port 8080
+```
+
+Screens: Dashboard (your real runs + a labelled demo engagement), New engagement
+wizard (validates scope, then launches), Live run (streamed pipeline + console),
+Findings + detail (request log, state-delta, sandboxed exploit, remediation),
+Report, Knowledge base and Settings (live provider + agent-fleet status). The UI
+loads React from a CDN, so first paint needs internet; fonts fall back to
+`system-ui`.
 
 ## Authenticated, multi-actor testing (identities)
 
@@ -201,32 +303,45 @@ destructive methods without `allow_destructive`, are blocked at the HTTP layer.
 
 ```
 venom/
-  config.py            Settings from .env
-  llm/providers.py     Multi-provider router (Anthropic/OpenRouter/NVIDIA/Ollama)
-  agents/              Multi-agent fleet: roles, Agent, Orchestrator (DeepSeek base)
+  config.py            Settings from .env (+ always-on secret redaction filter)
+  llm/providers.py     Multi-provider router (DeepSeek / NVIDIA NIM / OpenRouter / Ollama, fallback)
+  agents/              Multi-agent fleet: roles, Agent, Orchestrator
+  cognition/           Autonomous engine: oneshot (frugal) + iterative agent + the
+                         differential success oracle (objective.py)
+  tools/               Scope-guarded toolbox + sandboxed run_exploit_code (action
+                         grounding, AST validation) + exploit_kit technique primitives
+  knowledge/           Business-logic KB (20 classes) + surface-ranked priors
   integrations/        Keyless Burp Suite MCP client (loopback SSE)
   core/
     scope.py           Authorization guard (the safety boundary)
     registry.py        Unified endpoint registry + risk tiering
     graph.py           Business model graph (entities/transitions/rules/actors)
-  ingest/              OpenAPI, GraphQL, HAR, Burp XML, JS bundles + live crawler
+  ingest/              OpenAPI, GraphQL, HAR, Burp XML, JS bundles + live crawler + recon
   inference/           LLM rule inference + adversarial hypothesis generation
+  flows/               Deterministic PortSwigger-lab solvers (separate from the engine)
   rag/                 Writeup corpus + TF-IDF retriever (prior-art augmentation)
   testing/             Schema, API playbooks, web-app playbooks, generator
   engine/              Scope-guarded client + auth/identities + state-delta runner
   report/              Findings + evidence + Markdown/JSON/SARIF + audit trail
+  audit.py             HMAC-signed, tamper-evident audit trail + run metrics
   data/wordlists/      Bundled forced-browse wordlist (packaged into Docker)
   utils.py             JSONPath, HTML extract, PII redaction, sandboxed eval
   prompts/             Bundled VENOM master system prompt
+  web/                 Web console: std-lib HTTP server + JSON API + SSE + UI assets
   engagement.py        End-to-end orchestrator
   cli.py               Command-line interface
-scripts/               Burp + MCP download/run scripts (PowerShell + bash)
+vulnlab/               Built-in vulnerable app: 37 business-logic labs + registry
+scripts/
+  eval_vulnlab.py      Drive the engine across every lab, print a scorecard
+  setup_burp.* run_*   Burp + MCP download/run scripts (PowerShell + bash)
 ```
 
+```
 ## Docker
 
-A multi-stage, **non-root** image is provided, plus a Compose file with an
-optional local Ollama backend.
+A multi-stage, **non-root** image is provided. `docker compose up` launches the
+web console; the CLI, the standalone VulnLab target, and a local Ollama backend
+are opt-in (see [Compose](#compose) below).
 
 ```bash
 # Build the image
@@ -240,17 +355,31 @@ docker run --rm -v "$PWD/venom_data:/data" venom-agent:0.1.0 \
 
 ### Compose
 
-VENOM is a CLI, so use `run` rather than `up`:
+`docker compose up` starts **only the web console** — it is self-contained
+(launched engagements run in-process against the bundled VulnLab):
 
 ```bash
 cp .env.template .env                         # optional — runs offline without it
-docker compose build
+docker compose up --build                     # -> console http://localhost:8080
+```
+
+Everything else is **opt-in** and must be started explicitly (it is excluded
+from a plain `up`):
+
+```bash
+# Standalone VulnLab target on :8000 (the console does NOT need this — it only
+# matters if you want to browse the live target or hunt it from the CLI):
+docker compose up vulnlab                      # or: docker compose --profile target up
+
+# One-shot CLI (runs and exits) — VENOM is also a CLI:
 docker compose run --rm venom scope --scope examples/scope.json
-docker compose run --rm venom run --scope examples/scope.json --in examples/
+docker compose run --rm venom run   --scope examples/scope.json --in examples/
+docker compose run --rm venom hunt http://vulnlab:8000        # needs the target above
 ```
 
 Drop your own engagement files into `./engagements/` (bind-mounted read-only at
 `/engagements`) and reports land in `./venom_data/`.
+```
 
 ### Local / air-gapped LLM (Ollama)
 
@@ -292,10 +421,19 @@ artifacts — the engagement still runs.
 
 ## Tests
 
+The test suite is the proof of correctness — real behaviour, not stubs.
+
 ```powershell
 pip install pytest pytest-asyncio
-pytest
+pytest                                   # full suite (asyncio_mode=auto)
+pytest tests/test_vulnlab_labs.py        # ground truth: every lab solved + a negative test
+pytest tests/test_tools.py               # sandbox, action grounding, the success oracle
 ```
+
+Every VulnLab lab is proven genuinely exploitable by a human-authored exploit
+*before* any model is pointed at it, and the differential oracle is asserted to
+never confirm a win from a baked-in banner. Opt-in live-LLM tests are gated by
+`VENOM_LIVE_LLM=1` (skipped by default).
 
 ## Safety model (non-negotiable)
 

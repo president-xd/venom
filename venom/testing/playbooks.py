@@ -143,10 +143,14 @@ def sequence_bypass(registry: EndpointRegistry, graph: BusinessModelGraph, ident
         affected_endpoint=terminal.key,
         business_impact=f"Illegal state transition on {kw} yields an unearned outcome.",
         setup_steps=setup,
+        # Confirmation is PROOF, not a bare 200: the illegal transition must be
+        # ACCEPTED (success body, no error) on a resource we provisioned and never
+        # advanced through its precondition state — a genuine sequence differential.
         steps=[TestStep(step=2, description="Invoke terminal transition out of sequence",
                         method=terminal.method, path=attack_path, identity=attacker,
                         body={"reason": "venom-test"},
-                        success_condition="status in (200, 201)")],
+                        success_condition=("status in (200, 201) and bool(body) and "
+                                           "'error' not in text.lower()"))],
         rag_source="OWASP WSTG-BUSL-06",
     ))
     return cases
@@ -312,6 +316,14 @@ def faith_based_rules(graph: BusinessModelGraph, identities) -> list[TestCase]:
     for rule in graph.faith_based_rules():
         path = rule.attached_to.split(" ")[-1] if " " in rule.attached_to else "/"
         method = rule.attached_to.split(" ")[0] if " " in rule.attached_to else "POST"
+        # A business-CONSTRAINT is violated by performing a forbidden ACTION (a
+        # state-changing request), not by READING a page. A GET that returns 200 is
+        # just a landing page rendering — never proof of a logic flaw — so skip it
+        # rather than emit a guaranteed false positive. (Mutating faith-based rules
+        # are still emitted; the runner's verdict gate records them as leads unless a
+        # real state change / content proof corroborates them.)
+        if method.upper() == "GET":
+            continue
         cases.append(TestCase(
             test_id=_tid(),
             vulnerability_class=VulnClass.FAITH_BASED_RULE,

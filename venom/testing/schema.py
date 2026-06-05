@@ -119,6 +119,10 @@ class Finding:
     remediation: dict[str, str] = field(default_factory=dict)
     references: list[str] = field(default_factory=list)
     source_test_id: str = ""
+    # How this finding was actually confirmed — surfaced verbatim in the report/UI
+    # so we never imply a differential oracle where there was none.
+    origin: str = ""            # "agent" | "oneshot" | "flow" | "playbook"
+    confirmation: str = ""      # "differential oracle" | "state-delta" | "response-content" | ...
 
     def to_dict(self) -> dict:
         d = asdict(self)

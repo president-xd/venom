@@ -36,7 +36,7 @@ LABS = {
 def scope():
     return Scope.from_dict({
         "engagement_id": "EVAL", "target_name": "VulnLab", "authorized_base_urls": [BASE],
-        "allow_destructive": True, "rate_limit_per_second": 50,
+        "allow_destructive": True, "rate_limit_per_second": 200,
         "identities": [{"name": "wiener", "role": "user", "auth": {
             "type": "form_login", "login_url": "/login", "method": "POST",
             "username_field": "username", "password_field": "password",
@@ -45,6 +45,13 @@ def scope():
 
 
 async def run_lab(name, cfg):
+    # Honest measurement: reset the server so a persistent process cannot report a
+    # stale 'solved' banner from a previous lab/run as a (fake) win.
+    import httpx
+    try:
+        httpx.post(f"{BASE}/__reset", timeout=10)
+    except Exception:  # noqa: BLE001 - reset is best-effort
+        pass
     sc = scope()
     reg = EndpointRegistry()
     auth = await AuthManager(sc, dry_run=False).ensure("wiener")

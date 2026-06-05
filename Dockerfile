@@ -39,6 +39,12 @@ RUN pip install /wheels/*.whl && rm -rf /wheels
 # Ship the example artifacts so `docker run venom run --in examples/` works.
 COPY examples ./examples
 
+# Ship the deliberately-vulnerable VulnLab target so it can be served as the
+# autonomous agent's end-to-end proving ground:
+#   docker compose up -d vulnlab   ->   http://localhost:8000
+# (Pure-stdlib http.server app under /app/vulnlab; importable as `vulnlab.app`.)
+COPY vulnlab ./vulnlab
+
 # Engagement data lives on a mounted volume, writable by the venom user.
 RUN mkdir -p /data /engagements && chown -R venom:venom /data /engagements /app
 

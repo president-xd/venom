@@ -60,6 +60,21 @@ def build_brief(registry, objective: Objective, max_eps: int = 25, enrichment: d
         brief["denied_to_you"] = enrichment.get("denied_to_you", [])
         brief["authenticated_as"] = enrichment.get("authenticated_as")
         brief["page_snippets"] = [p for p in enrichment.get("probed", []) if p.get("snippet")][:12]
+        # Auto-loot: secrets already harvested from object-id enumeration (BOLA reads),
+        # and the cross-object reads that produced them. Gold for the exploit.
+        if enrichment.get("loot"):
+            brief["loot"] = enrichment["loot"][:12]
+        if enrichment.get("privileged_reads"):
+            brief["privileged_reads"] = enrichment["privileged_reads"][:8]
+        # Which custom auth header the privileged action expects is often named in the
+        # page prose ("needs header 'X-Staff-Pin'"). Surface it structurally so the
+        # model uses the RIGHT header for a looted secret instead of guessing X-API-Key.
+        blob = " ".join(p.get("snippet", "") for p in enrichment.get("probed", []))
+        hdrs = re.findall(r"[Hh]eader\s*['\"]?(X-[A-Za-z][A-Za-z0-9-]+)", blob)
+        if "bearer" in blob.lower() or "authorization" in blob.lower():
+            hdrs.append("Authorization")
+        if hdrs:
+            brief["auth_headers_seen"] = sorted(set(hdrs))
     return brief
 
 
@@ -88,19 +103,70 @@ def make_oneshot_synthesizer(llm_agent):
     Asks for a FENCED python block (not code-inside-JSON) — far more reliable for
     small local models, which mangle JSON-escaped multi-line code.
     """
+    def _endpoint_lines(brief: dict) -> str:
+        """Explicit, high-salience list of the ONLY paths the model may call —
+        the model otherwise copies example paths from the priors and invents URLs."""
+        lines = []
+        for e in brief.get("endpoints", []):
+            fields = list(e.get("params", []) or []) + list((e.get("form_defaults") or {}).keys())
+            extra = f"  fields={sorted(set(fields))}" if fields else ""
+            lines.append(f"  {e.get('method')} {e.get('path')}{extra}")
+        return "\n".join(lines)
+
+    # Best-of-N state: each retry is a fresh, MORE DIVERSE sample (higher
+    # temperature + an explicit "change approach" nudge), so retries explore new
+    # flaw classes instead of re-rolling the same dead end. This is the honest,
+    # model-agnostic reliability lever (no dependence on a specific model name).
+    state = {"attempt": 0}
+    _TEMP_RAMP = (0.1, 0.45, 0.7, 0.9, 1.0)
+
     async def synthesize(brief: dict, last_result: dict | None) -> dict:
+        attempt = state["attempt"]
+        state["attempt"] += 1
+        temperature = _TEMP_RAMP[min(attempt, len(_TEMP_RAMP) - 1)]
         fix = ""
         if last_result:
             fix = ("\n\nYour PREVIOUS exploit did NOT meet the objective. Short run result: "
-                   f"{str(last_result)[:400]}\nFix the code.")
+                   f"{str(last_result)[:400]}\nFix the code. IMPORTANT: do NOT repeat the same "
+                   "approach — try a DIFFERENT vulnerability class, a different endpoint, or a "
+                   "different parameter/identity substitution than your last attempt. Think step by "
+                   "step about WHY it was denied, then attack a different assumption.")
+        auth_as = brief.get("authenticated_as") or "the test user"
+        loot_block = ""
+        if brief.get("loot"):
+            loot_lines = "\n".join(
+                f"  {l.get('field')} = {l.get('value')!r}   (leaked by {l.get('found_at')})"
+                for l in brief["loot"])
+            hdr_hint = brief.get("auth_headers_seen")
+            hdr_txt = (f" The privileged action's header is one of these NAMED on the page: "
+                       f"{hdr_hint} — use that EXACT header name (do NOT default to X-API-Key)."
+                       if hdr_hint else "")
+            loot_block = (
+                "ALREADY-LOOTED SECRETS — extracted FOR YOU from readable endpoints. Use the "
+                "LITERAL value as the credential the privileged action needs (an Authorization: "
+                "Bearer header, an X-API-Key / X-*-Token / X-*-Pin header named on the page, or a "
+                "'token'/'key' form field). Do NOT re-fetch or re-guess them:\n" + loot_lines
+                + hdr_txt + "\n\n")
         user = (
             "Write ONE self-contained exploit for an app you are authorized to test.\n"
-            f"BUSINESS-LOGIC PRIORS (ranked to this target):\n{kb_prompt(surface=str(brief))}\n\n"
+            f"OBJECTIVE — your end goal: {brief.get('objective')}\n"
+            f"You usually must ESCALATE FIRST: an admin-only action needs ADMIN power, so take over "
+            f"or impersonate the PRIVILEGED account (e.g. 'administrator') — steal/forge ITS "
+            f"credential, or reset ITS password then login() as it — and ONLY THEN perform the goal "
+            f"on the exact target named. Do not take over the victim you are targeting.\n\n"
+            + loot_block +
+            f"CALLABLE ENDPOINTS — use these EXACT method+path strings and NOTHING ELSE "
+            f"(do NOT invent paths, and do NOT POST /login — you are ALREADY authenticated as "
+            f"'{auth_as}'):\n{_endpoint_lines(brief)}\n\n"
+            f"BUSINESS-LOGIC PRIORS (ranked to this target; their example paths are ILLUSTRATIVE — "
+            f"map them onto the CALLABLE ENDPOINTS above):\n{kb_prompt(surface=str(brief))}\n\n"
             f"RECON BRIEF (endpoints/forms/catalog/credit + what you CAN and CANNOT do):\n{brief}\n\n"
             "The brief's 'denied_to_you' lists actions you currently CANNOT perform; "
             "'accessible_to_you' lists what you can. Your job: find the business-logic flaw that "
             "lets you perform a DENIED action (the objective). Reason from 'page_snippets' and form "
-            "fields — e.g. a profile/update form may silently accept an extra privileged field.\n"
+            "fields — e.g. a profile/update form may silently accept an extra privileged field. "
+            "If a request field names an account/owner/source you do NOT own (from_account, user, "
+            "id, ...), try SUBSTITUTING a more-privileged value seen in recon — the server may trust it.\n"
             "OUTPUT FORMAT — exactly two parts and nothing else:\n"
             "1) a line: VULN: <vuln id from the priors>\n"
             "2) a ```python code block defining `async def exploit(http):`\n"
@@ -123,7 +189,7 @@ def make_oneshot_synthesizer(llm_agent):
             "    r = await http('POST', '/cart', data={'productId': '1', 'quantity': '1'})\n"
             "    return r['status']\n```"
         )
-        text = await llm_agent.complete_text(user, temperature=0.1)
+        text = await llm_agent.complete_text(user, temperature=temperature)
         vm = _VULN.search(text or "")
         return {"vuln_class": vm.group(1) if vm else "", "rationale": "",
                 "exploit_code": _extract_code(text)}
@@ -132,8 +198,12 @@ def make_oneshot_synthesizer(llm_agent):
 
 
 async def oneshot_hunt(scope: Scope, registry, synthesize, *, objective: Objective,
-                       transport=None, max_llm_calls: int = 3) -> list[TestCase]:
-    """Run the frugal hunt. At most `max_llm_calls` calls to `synthesize`."""
+                       transport=None, max_llm_calls: int = 3, enrichment: dict | None = None) -> list[TestCase]:
+    """Run the frugal hunt. At most `max_llm_calls` calls to `synthesize`.
+
+    `enrichment` may be passed precomputed (the coverage campaign computes the
+    accessible/denied recon ONCE and reuses it across many per-target hunts instead
+    of re-probing the surface for every objective)."""
     from ..audit import RunMetrics, sign_records
     metrics = RunMetrics()
     notebook = Notebook()
@@ -153,12 +223,15 @@ async def oneshot_hunt(scope: Scope, registry, synthesize, *, objective: Objecti
     if objective.win_action and objective.win_action.get("path"):
         toolbox.known_paths.add(objective.win_action["path"].rstrip("/") or "/")
     # Recon depth: probe the surface as the current user → accessible/denied maps.
-    from ..ingest.recon import enrich_recon
-    try:
-        enrichment = await enrich_recon(scope, registry, transport=transport)
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("recon enrichment failed: %s", exc)
-        enrichment = {}
+    # Reuse a precomputed enrichment when the campaign supplies one (avoids
+    # re-probing the whole surface once per target).
+    if enrichment is None:
+        from ..ingest.recon import enrich_recon
+        try:
+            enrichment = await enrich_recon(scope, registry, transport=transport)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("recon enrichment failed: %s", exc)
+            enrichment = {}
     brief = build_brief(registry, objective, enrichment=enrichment)
     last_result = None
     calls = 0
@@ -185,6 +258,13 @@ async def oneshot_hunt(scope: Scope, registry, synthesize, *, objective: Objecti
             try:
                 res = await toolbox.run_exploit_code(code)
                 met = bool((await toolbox.check_objective()).data.get("met"))
+                # The bare win-action re-run only proves SESSION escalation. If the
+                # privilege was carried IN the winning request (e.g. a looted token in
+                # a BOLA delete), the exploit's own trace shows the win — accept that
+                # too (baseline was already denied, so the differential still holds).
+                if not met and objective.win_action:
+                    if objective.action_succeeded_in_trace((res.data or {}).get("trace")):
+                        met = True
             except Exception as exc:  # noqa: BLE001 — one bad attempt must not abort the hunt
                 logger.warning("oneshot attempt %d errored: %s", calls, exc)
                 last_result = {"objective_met": False, "run_error": str(exc)[:200],

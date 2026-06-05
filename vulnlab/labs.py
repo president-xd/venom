@@ -34,6 +34,8 @@ import base64
 import hashlib
 import hmac
 import json
+import math
+import re
 from dataclasses import dataclass, field
 from typing import Callable, Optional
 from urllib.parse import parse_qs
@@ -55,6 +57,8 @@ ADMIN_API_KEY = "ak_live_3b9d7e2f5c1a8024"
 ADMIN_INVITE = "inv_megacorp_7c3f9a"      # leaked by the cross-tenant member list
 OTP_CODE = "284193"                       # the 2FA code (never shown; brute/bypass instead)
 STAFF_PIN = "clinic-staff-55207"          # leaked by the BOLA medical-record read
+# Enterprise-III secrets (only obtainable through the bug under test).
+GQL_ADMIN_TOKEN = "gql_adm_4e8b1c9d"      # leaked by the GraphQL over-fetch of user(id:1)
 
 
 def default_users() -> dict:
@@ -871,6 +875,332 @@ def h_referral(state, method, path, query, cookies, sess, form, headers=None):
 
 
 # =====================================================================
+# ENTERPRISE III — more real-world surfaces (GraphQL, legacy auth, ERP,
+# fintech, IAM, payments, batch APIs, licensing, network-trust, metering).
+# Each is a genuine business-logic flaw with a deterministic proof.
+# =====================================================================
+
+# ---- 27. GraphQL field-level authz / over-fetch -> admin mutation --------
+def h_graphql(state, method, path, query, cookies, sess, form, headers=None):
+    USERS = {"1": ("administrator", "administrator", GQL_ADMIN_TOKEN),
+             "2": ("wiener", "user", "gql_usr_wiener"),
+             "3": ("carlos", "user", "gql_usr_carlos")}
+    if path == "/graphql" and method == "GET":
+        return 200, _page(_banner(state, "graphql") +
+                          "<h2>GraphQL API</h2>POST a form field 'query'. Schema: "
+                          "query user(id){ name role apiToken }; "
+                          "mutation deleteUser(name, adminToken). Deletion needs an "
+                          "administrator's apiToken. "
+                          "<form action=/graphql method=POST><input name=query></form>"), None
+    if path == "/graphql" and method == "POST":
+        q = form.get("query", "")
+        m = re.search(r'user\s*\(\s*id\s*:\s*"?(\w+)"?', q, re.I)
+        if m and re.search(r'apitoken', q, re.I):
+            u = USERS.get(m.group(1))
+            # FLAW: no field-level authz — apiToken is returned for ANY user object.
+            if u:
+                return 200, json.dumps({"data": {"user": {"name": u[0], "role": u[1],
+                                                          "apiToken": u[2]}}}), None
+            return 200, json.dumps({"data": {"user": None}}), None
+        if re.search(r'deleteuser', q, re.I):
+            nm = re.search(r'name\s*:\s*"?([^",)\s]+)', q, re.I)
+            tk = re.search(r'admintoken\s*:\s*"?([^",)\s]+)', q, re.I)
+            name = nm.group(1) if nm else ""
+            token = tk.group(1) if tk else ""
+            if token == GQL_ADMIN_TOKEN and name == "carlos":
+                state["solved"]["graphql"] = True
+                return 200, json.dumps({"data": {"deleteUser": {"deleted": name}}}), None
+            return 200, json.dumps({"errors": [{"message": "forbidden"}]}), None
+        return 200, json.dumps({"data": None}), None
+    return None
+
+
+# ---- 28. Forgeable identity cookie (non-JWT token forgery) ---------------
+def h_cookie(state, method, path, query, cookies, sess, form, headers=None):
+    if path == "/portal" and method == "GET":
+        sample = _b64url_encode(b"wiener:user")
+        return 200, _page(_banner(state, "cookie") +
+                          "<h2>LegacyPortal</h2>Your identity is the 'auth' cookie, set to "
+                          "base64('user:role'). Admin-only: remove a user. "
+                          "<form action=/portal/remove-user method=POST>"
+                          "<input name=username></form>"), f"auth={sample}; Path=/"
+    if path == "/portal/remove-user" and method == "POST":
+        role = ""
+        try:
+            ident = _b64url_decode(cookies.get("auth", "")).decode()
+            role = ident.split(":", 1)[1] if ":" in ident else ""
+        except Exception:
+            role = ""
+        # FLAW: identity/role is read from a client-forgeable, unsigned cookie.
+        if role == "administrator" and form.get("username") == "carlos":
+            state["solved"]["cookie"] = True
+            return 200, _page("removed carlos"), None
+        return 403, _page("forbidden"), None
+    return None
+
+
+# ---- 29. Expense self-approval (segregation-of-duties violation) ---------
+def h_selfapprove(state, method, path, query, cookies, sess, form, headers=None):
+    if path == "/erp" and method == "GET":
+        return 200, _page(_banner(state, "selfapprove") +
+                          "<h2>Acme ERP — Expenses</h2>Expenses over 1000 must be approved by a "
+                          "DIFFERENT manager before they can be paid. "
+                          "<form action=/erp/submit method=POST><input name=amount></form>"
+                          "<form action=/erp/approve method=POST><input name=expense_id></form>"
+                          "<form action=/erp/pay method=POST><input name=expense_id></form>"), None
+    if _need_login(sess) and path.startswith("/erp/"):
+        return 401, _page("login first"), None
+    if path == "/erp/submit" and method == "POST":
+        exp = state.setdefault("expenses", {})
+        try:
+            amt = int(form.get("amount", "0"))
+        except ValueError:
+            return 200, _page("bad amount"), None
+        eid = f"EXP-{len(exp) + 1}"
+        exp[eid] = {"amount": amt, "submitter": sess.get("user"), "approved": False, "paid": False}
+        return 200, _page(f"created {eid}: amount {amt}"), None
+    if path == "/erp/approve" and method == "POST":
+        rec = state.get("expenses", {}).get(form.get("expense_id", ""))
+        if rec:
+            # FLAW: no segregation of duties — the submitter can approve their own expense.
+            rec["approved"] = True
+            return 200, _page(f"approved {form.get('expense_id')}"), None
+        return 200, _page("no such expense"), None
+    if path == "/erp/pay" and method == "POST":
+        rec = state.get("expenses", {}).get(form.get("expense_id", ""))
+        if rec and rec["approved"] and not rec["paid"]:
+            rec["paid"] = True
+            if rec["amount"] > 1000:
+                state["solved"]["selfapprove"] = True
+            return 200, _page(f"paid {form.get('expense_id')} ({rec['amount']})"), None
+        return 200, _page("cannot pay"), None
+    return None
+
+
+# ---- 30. Coupon stacking (mutually-exclusive codes combine) --------------
+def h_stack(state, method, path, query, cookies, sess, form, headers=None):
+    if path == "/stack" and method == "GET":
+        return 200, _page(_banner(state, "stack") +
+                          "<h2>ShopStack Checkout</h2>The jacket costs 50. Promo codes SAVE30 and "
+                          "EXTRA30 each take 30 off (one promotion per order). "
+                          "<form action=/stack/apply method=POST><input name=code></form>"
+                          "<form action=/stack/checkout method=POST></form>"), None
+    if _need_login(sess) and path.startswith("/stack/"):
+        return 401, _page("login first"), None
+    if path == "/stack/apply" and method == "POST":
+        sess.setdefault("price", 50)
+        # FLAW: no mutual-exclusion / single-use — discounts stack without limit.
+        if form.get("code") in ("SAVE30", "EXTRA30"):
+            sess["price"] -= 30
+            return 200, _page(f"applied {form.get('code')}; price now {sess['price']}"), None
+        return 200, _page("invalid code"), None
+    if path == "/stack/checkout" and method == "POST":
+        if sess.get("price", 50) <= 0:
+            state["solved"]["stack"] = True
+            return 200, _page("purchased jacket for free"), None
+        return 200, _page(f"price {sess.get('price', 50)}"), None
+    return None
+
+
+# ---- 31. Currency-conversion rounding arbitrage --------------------------
+def h_fx(state, method, path, query, cookies, sess, form, headers=None):
+    JACKET = 130
+    if path == "/fx" and method == "GET":
+        return 200, _page(_banner(state, "fx") +
+                          "<h2>GlobePay Wallet</h2>Balance 100 USD. Convert between USD and EUR "
+                          "(USD->EUR rate 0.9, EUR->USD rate 1.12; converted amounts round UP). "
+                          "The jacket costs 130 USD. "
+                          "<form action=/fx/convert method=POST><input name=to><input name=amount></form>"
+                          "<form action=/fx/buy method=POST></form>"), None
+    if _need_login(sess) and path.startswith("/fx/"):
+        return 401, _page("login first"), None
+    if path == "/fx/convert" and method == "POST":
+        w = sess.setdefault("wallet", {"USD": 100, "EUR": 0})
+        to = form.get("to", "").upper()
+        try:
+            amt = int(form.get("amount", "0"))
+        except ValueError:
+            return 200, _page("bad amount"), None
+        # FLAW: rounding UP on every conversion makes a round-trip net positive.
+        if to == "EUR" and amt > 0 and w["USD"] >= amt:
+            w["USD"] -= amt
+            w["EUR"] += math.ceil(amt * 0.9)
+        elif to == "USD" and amt > 0 and w["EUR"] >= amt:
+            w["EUR"] -= amt
+            w["USD"] += math.ceil(amt * 1.12)
+        else:
+            return 200, _page(f"USD {w['USD']} EUR {w['EUR']}; bad conversion"), None
+        return 200, _page(f"USD {w['USD']} EUR {w['EUR']}"), None
+    if path == "/fx/buy" and method == "POST":
+        w = sess.setdefault("wallet", {"USD": 100, "EUR": 0})
+        if w["USD"] >= JACKET:
+            state["solved"]["fx"] = True
+            return 200, _page("purchased the jacket"), None
+        return 200, _page(f"USD {w['USD']} < {JACKET}"), None
+    return None
+
+
+# ---- 32. IAM self-add to a privileged group (BFLA) ----------------------
+def h_iam(state, method, path, query, cookies, sess, form, headers=None):
+    if path == "/iam" and method == "GET":
+        return 200, _page(_banner(state, "iam") +
+                          "<h2>CloudIAM Console</h2>You belong to group 'developers'. Deleting "
+                          "users requires membership of 'platform-admins'. "
+                          "<form action=/iam/group/add method=POST><input name=group></form>"
+                          "<form action=/iam/user/delete method=POST><input name=username></form>"), None
+    if _need_login(sess) and path.startswith("/iam/"):
+        return 401, _page("login first"), None
+    if path == "/iam/group/add" and method == "POST":
+        g = sess.setdefault("groups", ["developers"])
+        # FLAW: no authorization on group assignment — self-add to any group.
+        if form.get("group") and form["group"] not in g:
+            g.append(form["group"])
+        return 200, _page(f"groups: {g}"), None
+    if path == "/iam/user/delete" and method == "POST":
+        if sess and "platform-admins" in sess.get("groups", []) and form.get("username") == "carlos":
+            state["solved"]["iam"] = True
+            return 200, _page("deleted carlos"), None
+        return 403, _page("forbidden"), None
+    return None
+
+
+# ---- 33. Replayable signed payment receipt ------------------------------
+def h_receipt(state, method, path, query, cookies, sess, form, headers=None):
+    JACKET = 500
+    if path == "/pay" and method == "GET":
+        return 200, _page(_banner(state, "receipt") +
+                          "<h2>PayDesk</h2>Wallet 0 credit. A deposit issues a signed receipt "
+                          "token; submit it to credit your wallet by 50 (receipts are single-use). "
+                          "The jacket costs 500. "
+                          "<form action=/pay/deposit method=POST></form>"
+                          "<form action=/pay/credit method=POST><input name=receipt></form>"
+                          "<form action=/pay/buy method=POST></form>"), None
+    if _need_login(sess) and path.startswith("/pay/"):
+        return 401, _page("login first"), None
+    if path == "/pay/deposit" and method == "POST":
+        state["n"] += 1
+        rid = f"rcpt-{state['n']}"
+        sig = _b64url_encode(hmac.new(JWT_SECRET, rid.encode(), hashlib.sha256).digest())[:10]
+        tok = f"{rid}.{sig}"
+        state.setdefault("receipts", {})[tok] = 50
+        return 200, _page(f"deposit receipt: {tok}"), None
+    if path == "/pay/credit" and method == "POST":
+        sess.setdefault("wallet", 0)
+        tok = form.get("receipt", "")
+        # FLAW: the receipt's signature is verified but it is never marked used -> replay.
+        if tok in state.get("receipts", {}):
+            sess["wallet"] += state["receipts"][tok]
+            return 200, _page(f"credited; wallet {sess['wallet']}"), None
+        return 200, _page("invalid receipt"), None
+    if path == "/pay/buy" and method == "POST":
+        sess.setdefault("wallet", 0)
+        if sess["wallet"] >= JACKET:
+            state["solved"]["receipt"] = True
+            return 200, _page("purchased the jacket"), None
+        return 200, _page(f"wallet {sess['wallet']} < {JACKET}"), None
+    return None
+
+
+# ---- 34. Batch API: authorization checked only on the first op ----------
+def h_batch(state, method, path, query, cookies, sess, form, headers=None):
+    if path == "/batch" and method == "GET":
+        return 200, _page(_banner(state, "batch") +
+                          "<h2>BulkOps API</h2>Submit several operations in one call as 'ops' "
+                          "(semicolon-separated, e.g. 'read:me;read:profile'). The privileged op "
+                          "is 'delete:&lt;user&gt;'. "
+                          "<form action=/batch/run method=POST><input name=ops></form>"), None
+    if _need_login(sess) and path.startswith("/batch/"):
+        return 401, _page("login first"), None
+    if path == "/batch/run" and method == "POST":
+        ops = [o.strip() for o in form.get("ops", "").split(";") if o.strip()]
+        if not ops:
+            return 200, _page("no ops"), None
+        # FLAW: authorization is enforced on the FIRST op only; the rest run unchecked.
+        if ops[0].startswith("delete:"):
+            return 403, _page("forbidden"), None
+        results = []
+        for o in ops:
+            if o.startswith("delete:"):
+                tgt = o.split(":", 1)[1]
+                if tgt == "carlos":
+                    state["solved"]["batch"] = True
+                results.append(f"deleted {tgt}")
+            else:
+                results.append(f"ok {o}")
+        return 200, _page("; ".join(results)), None
+    return None
+
+
+# ---- 35. License activation trusts the client-supplied plan -------------
+def h_license(state, method, path, query, cookies, sess, form, headers=None):
+    if path == "/license" and method == "GET":
+        return 200, _page(_banner(state, "license") +
+                          "<h2>Activate License</h2>Your plan is set from the activation request. "
+                          "Plans: free, premium, enterprise. Premium features need plan >= premium. "
+                          "<form action=/license/activate method=POST><input name=plan></form>"
+                          "<form action=/license/feature method=POST></form>"), None
+    if _need_login(sess) and path.startswith("/license/"):
+        return 401, _page("login first"), None
+    if path == "/license/activate" and method == "POST":
+        # FLAW: trusts the client-supplied plan instead of the server-side purchase record.
+        sess["plan"] = form.get("plan", "free")
+        return 200, _page(f"activated plan {sess['plan']}"), None
+    if path == "/license/feature" and method == "POST":
+        if str(sess.get("plan", "")).lower() in ("premium", "enterprise"):
+            state["solved"]["license"] = True
+            return 200, _page("premium feature unlocked"), None
+        return 200, _page("upgrade required"), None
+    return None
+
+
+# ---- 36. Network-trust bypass via a forwarded-for header ----------------
+def h_headerip(state, method, path, query, cookies, sess, form, headers=None):
+    headers = _norm_headers(headers)
+    if path == "/adminpanel" and method == "GET":
+        return 200, _page(_banner(state, "headerip") +
+                          "<h2>Ops Admin Panel</h2>Destructive actions are restricted to the "
+                          "internal network (10.0.0.0/8), determined by the 'X-Forwarded-For' "
+                          "header. Delete a user: "
+                          "<form action=/adminpanel/delete method=POST><input name=username></form>"), None
+    if path == "/adminpanel/delete" and method == "POST":
+        xff = str(headers.get("x-forwarded-for", "")).strip()
+        # FLAW: trusts a client-set forwarding header to grant internal/admin access.
+        internal = xff.startswith("10.") or xff.startswith("127.")
+        if internal and form.get("username") == "carlos":
+            state["solved"]["headerip"] = True
+            return 200, _page("deleted carlos"), None
+        return 403, _page("forbidden"), None
+    return None
+
+
+# ---- 37. Usage metering tamper (client-synced counter) ------------------
+def h_quota(state, method, path, query, cookies, sess, form, headers=None):
+    if path == "/usage" and method == "GET":
+        return 200, _page(_banner(state, "quota") +
+                          "<h2>MeterAPI</h2>The free tier allows 3 premium-report generations. "
+                          "The client syncs its usage counter with the server. "
+                          "<form action=/usage/sync method=POST><input name=used></form>"
+                          "<form action=/usage/generate method=POST></form>"), None
+    if _need_login(sess) and path.startswith("/usage/"):
+        return 401, _page("login first"), None
+    if path == "/usage/sync" and method == "POST":
+        try:
+            # FLAW: the server overwrites its usage counter with the client's value.
+            sess["used"] = int(form.get("used", "0"))
+        except ValueError:
+            return 200, _page("bad value"), None
+        return 200, _page(f"usage synced to {sess['used']}"), None
+    if path == "/usage/generate" and method == "POST":
+        sess.setdefault("used", 3)   # you have already exhausted the free tier
+        if sess["used"] < 3:
+            sess["used"] += 1
+            state["solved"]["quota"] = True
+            return 200, _page("premium report generated"), None
+        return 200, _page(f"quota exceeded ({sess['used']}/3)"), None
+    return None
+
+
+# =====================================================================
 # REGISTRY
 # =====================================================================
 LABS: list[Lab] = [
@@ -1017,6 +1347,65 @@ LABS: list[Lab] = [
         win_url="/refer", win_action=None, seeds=["/refer"],
         index_link="<a href=/refer>referral</a>", vuln_id="domain-specific",
         handler=h_referral),
+    # ---- enterprise III (GraphQL, legacy auth, ERP, fintech, IAM, ...) ----
+    Lab(name="graphql", difficulty="hard", solved_key="graphql", title="GraphQL field-authz over-fetch",
+        objective="Delete the user 'carlos' via the GraphQL API.",
+        win_url="/graphql", win_action=None, seeds=["/graphql"],
+        index_link="<a href=/graphql>graphql</a>", vuln_id="broken-object-level-auth",
+        handler=h_graphql),
+    Lab(name="cookie", difficulty="medium", solved_key="cookie", title="Forgeable identity cookie",
+        objective="Remove the user 'carlos' via the admin portal.",
+        win_url="/portal", success_text="removed", seeds=["/portal"],
+        win_action={"method": "POST", "path": "/portal/remove-user", "data": {"username": "carlos"}},
+        index_link="<a href=/portal>cookie</a>", vuln_id="trusted-identity-param",
+        handler=h_cookie),
+    Lab(name="selfapprove", difficulty="hard", solved_key="selfapprove", title="Expense self-approval (SoD)",
+        objective="Get a high-value expense (over 1000) approved and paid.",
+        win_url="/erp", win_action=None, seeds=["/erp"],
+        index_link="<a href=/erp>selfapprove</a>", vuln_id="sequence-bypass",
+        handler=h_selfapprove),
+    Lab(name="stack", difficulty="medium", solved_key="stack", title="Coupon stacking",
+        objective="Obtain the jacket for free.",
+        win_url="/stack", win_action=None, seeds=["/stack"],
+        index_link="<a href=/stack>stack</a>", vuln_id="domain-specific",
+        handler=h_stack),
+    Lab(name="fx", difficulty="hard", solved_key="fx", title="Currency rounding arbitrage",
+        objective="Buy the 130-USD jacket starting from only 100 USD.",
+        win_url="/fx", win_action=None, seeds=["/fx"],
+        index_link="<a href=/fx>fx</a>", vuln_id="integer-overflow",
+        handler=h_fx),
+    Lab(name="iam", difficulty="medium", solved_key="iam", title="IAM group self-add (BFLA)",
+        objective="Delete the user 'carlos' in the IAM console.",
+        win_url="/iam", success_text="deleted", seeds=["/iam"],
+        win_action={"method": "POST", "path": "/iam/user/delete", "data": {"username": "carlos"}},
+        index_link="<a href=/iam>iam</a>", vuln_id="bfla-access-control",
+        handler=h_iam),
+    Lab(name="receipt", difficulty="hard", solved_key="receipt", title="Replayable payment receipt",
+        objective="Buy the 500-credit jacket starting from 0 credit.",
+        win_url="/pay", win_action=None, seeds=["/pay"],
+        index_link="<a href=/pay>receipt</a>", vuln_id="coupon-reuse",
+        handler=h_receipt),
+    Lab(name="batch", difficulty="medium", solved_key="batch", title="Batch API authz bypass",
+        objective="Delete the user 'carlos' via the bulk operations API.",
+        win_url="/batch", win_action=None, seeds=["/batch"],
+        index_link="<a href=/batch>batch</a>", vuln_id="bfla-access-control",
+        handler=h_batch),
+    Lab(name="license", difficulty="medium", solved_key="license", title="License plan tampering",
+        objective="Unlock a premium feature without paying.",
+        win_url="/license", win_action=None, seeds=["/license"],
+        index_link="<a href=/license>license</a>", vuln_id="mass-assignment",
+        handler=h_license),
+    Lab(name="headerip", difficulty="hard", solved_key="headerip", title="Forwarded-for network-trust bypass",
+        objective="Delete the user 'carlos' from the ops admin panel.",
+        win_url="/adminpanel", success_text="deleted", seeds=["/adminpanel"],
+        win_action={"method": "POST", "path": "/adminpanel/delete", "data": {"username": "carlos"}},
+        index_link="<a href=/adminpanel>headerip</a>", vuln_id="trusted-identity-param",
+        handler=h_headerip),
+    Lab(name="quota", difficulty="medium", solved_key="quota", title="Usage-metering tamper",
+        objective="Generate a premium report after exhausting the free quota.",
+        win_url="/usage", win_action=None, seeds=["/usage"],
+        index_link="<a href=/usage>quota</a>", vuln_id="client-side-trust",
+        handler=h_quota),
 ]
 
 SOLVED_KEYS = [lab.solved_key for lab in LABS]

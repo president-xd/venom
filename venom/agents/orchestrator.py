@@ -122,9 +122,14 @@ def build_orchestrator(router: LLMRouter | None) -> Orchestrator | None:
     """Construct the fleet. Returns None if there is no router at all."""
     if router is None:
         return None
+    # The fleet is live if ANY keyed cloud provider is configured (DeepSeek is the
+    # paid primary; NVIDIA NIM / OpenRouter are fallbacks). Air-gap relies on Ollama.
     nim = router.providers.get(Provider.NVIDIA_NIM)
-    enabled = bool(nim and nim.enabled)
+    ds = router.providers.get(Provider.DEEPSEEK)
+    orr = router.providers.get(Provider.OPENROUTER)
+    enabled = bool((ds and ds.enabled) or (nim and nim.enabled)
+                   or (orr and orr.enabled) or getattr(router, "air_gap", False))
     agents = {role: Agent(spec, router) for role, spec in DEFAULT_AGENTS.items()}
     if not enabled:
-        logger.warning("NVIDIA NIM not configured — multi-agent fleet disabled (offline mode).")
+        logger.warning("No LLM provider configured — multi-agent fleet disabled (offline mode).")
     return Orchestrator(router, agents, enabled)

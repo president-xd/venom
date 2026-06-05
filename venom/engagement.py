@@ -47,6 +47,23 @@ async def _lab_solved(scope, transport) -> bool:
         await c.aclose()
 
 
+def _dedup_confirmed(cases: list) -> list:
+    """Collapse duplicate CONFIRMED findings (same vuln class + endpoint) proven by
+    more than one engine into a single case, keeping the first (richest evidence).
+    Non-confirmed cases are preserved as-is (leads/negatives stay in the appendix)."""
+    from .testing.schema import Verdict
+    seen: set[tuple] = set()
+    out = []
+    for c in cases:
+        if c.verdict == Verdict.CONFIRMED_EXPLOIT:
+            key = (c.vulnerability_class, (c.affected_endpoint or "").rstrip("/"))
+            if key in seen:
+                continue
+            seen.add(key)
+        out.append(c)
+    return out
+
+
 @dataclass
 class EngagementResult:
     scope: Scope
@@ -169,8 +186,54 @@ async def run_engagement(
                 logger.info("Agent confirmed %d finding(s) toward objective", len(reasoned))
         except Exception as exc:  # noqa: BLE001 — reasoning is best-effort
             logger.warning("Agent error: %s", exc)
+
+        # COVERAGE CAMPAIGN — do NOT stop at one. Decompose the surface into many
+        # scoped differential targets (every action the tester is currently FORBIDDEN
+        # to perform) and hunt EACH one, collecting every flaw that can be PROVEN.
+        # This is what turns "found 1 of N" into systematic coverage; each win is
+        # still verified by the differential oracle, so more findings ≠ false positives.
+        try:
+            from .cognition import run_campaign, derive_objectives, make_oneshot_synthesizer
+            from .ingest.recon import enrich_recon
+            # Probe WIDE for the campaign — the more of the surface we map, the more
+            # forbidden actions we surface to decompose into targets (default 24 is
+            # tuned for a single brief; coverage wants the whole reachable surface).
+            enrichment = await enrich_recon(scope, ing.registry, transport=transport,
+                                            max_probes=max(80, SETTINGS.campaign_max_targets * 6))
+            targets = derive_objectives(ing.registry, enrichment,
+                                        base_objective=getattr(objective, "description", ""),
+                                        max_targets=SETTINGS.campaign_max_targets)
+            if targets:
+                logger.info("Coverage campaign: hunting %d forbidden-action target(s) across the surface",
+                            len(targets))
+                camp = await run_campaign(
+                    scope, ing.registry,
+                    lambda: make_oneshot_synthesizer(orch.agent(AgentRole.CODEGEN)),
+                    objectives=targets, transport=transport, enrichment=enrichment,
+                    per_target_calls=SETTINGS.campaign_per_target_calls,
+                    max_targets=SETTINGS.campaign_max_targets)
+                cases += camp.findings
+                ing.notes.append(camp.summary())
+                logger.info("Coverage campaign confirmed %d finding(s) across %d target(s)",
+                            camp.confirmed, camp.attempted)
+        except Exception as exc:  # noqa: BLE001 — coverage is best-effort, never aborts the run
+            logger.warning("Coverage campaign error: %s", exc)
+
         if router.budget is not None:
             ing.notes.append(f"Agent LLM usage: {router.tracer.summary()} | {router.budget.summary()}")
+
+    # Actionable guidance: a registration endpoint exists but the operator gave no
+    # email client URL — every email-confirmation exploit (account-takeover,
+    # email-parser discrepancy, truncation) NEEDS to read the confirmation link, so
+    # they cannot complete. Say so loudly instead of silently skipping them.
+    _has_register = any(e.path.rstrip("/").endswith("/register") for e in ing.registry)
+    if not dry_run and _has_register and not scope.email_client_url:
+        logger.warning(
+            "Registration endpoint found, but NO email client URL is configured. "
+            "Email-confirmation exploits (account-takeover, email-parser discrepancy, "
+            "email truncation) require reading the registration confirmation link, so they "
+            "CANNOT complete the register -> confirm -> login -> admin chain. Provide the "
+            "inbox / exploit-server email URL in the engagement to hunt these registration labs.")
 
     # 6c. Account-lifecycle flow (registration + email verification + privilege
     # via email domain). Runs when an inbox URL is configured and a register
@@ -292,6 +355,11 @@ async def run_engagement(
                 logger.info("Integer-overflow flow confirmed %d finding(s)", len(ovf))
         except Exception as exc:  # noqa: BLE001
             logger.warning("Integer-overflow flow error: %s", exc)
+
+    # Dedup CONFIRMED findings — the agent, the coverage campaign, the playbooks and
+    # the flows can each prove the same flaw; report it once. Keyed by the actual
+    # win (class + endpoint); the first confirmation (richest evidence) is kept.
+    cases = _dedup_confirmed(cases)
 
     # SUMMARIZER subagent: terse coverage/results summary for the operator.
     if orch is not None and orch.enabled:

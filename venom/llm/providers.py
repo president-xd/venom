@@ -2,10 +2,13 @@
 Multi-provider LLM router for the VENOM pentest agent.
 
 Supported providers:
-  - Anthropic (Claude)       -> cloud, strongest reasoning
+  - DeepSeek                 -> cloud, paid primary (OpenAI-compatible; deepseek-chat/-reasoner)
   - OpenRouter               -> cloud, flexible model routing + fallback
   - NVIDIA NIM               -> cloud/on-prem GPU, enterprise deployments
   - Ollama                   -> fully local, air-gapped engagements
+
+(An Anthropic adapter exists for completeness but is unused in this deployment —
+there is no Anthropic key and it is not in the routing/fallback tables.)
 
 Usage:
     from venom.llm import LLMRouter, TaskType
@@ -50,6 +53,7 @@ class TaskType(str, Enum):
 
 class Provider(str, Enum):
     ANTHROPIC  = "anthropic"
+    DEEPSEEK   = "deepseek"
     OPENROUTER = "openrouter"
     NVIDIA_NIM = "nvidia_nim"
     OLLAMA     = "ollama"
@@ -106,6 +110,20 @@ ANTHROPIC_DEFAULT = ProviderConfig(
     requests_per_minute=50,
 )
 
+DEEPSEEK_DEFAULT = ProviderConfig(
+    provider=Provider.DEEPSEEK,
+    api_key=os.getenv("DEEPSEEK_API_KEY"),
+    # OpenAI-compatible Chat Completions API. `deepseek-chat` is V3 (fast, strong
+    # codegen); `deepseek-reasoner` is R1 (slower, returns reasoning_content too —
+    # handled by _extract_message_text). Base URL accepts an optional /v1.
+    base_url=os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com/chat/completions"),
+    model=os.getenv("DEEPSEEK_MODEL", "deepseek-chat"),
+    max_tokens=4096,
+    temperature=0.2,
+    timeout=180.0,            # reasoner can be slow; chat is fast
+    requests_per_minute=int(os.getenv("DEEPSEEK_RPM", "60")),
+)
+
 OPENROUTER_DEFAULT = ProviderConfig(
     provider=Provider.OPENROUTER,
     api_key=os.getenv("OPENROUTER_API_KEY"),
@@ -153,16 +171,18 @@ OLLAMA_DEFAULT = ProviderConfig(
 # Task -> provider routing tables
 # ---------------------------------------------------------------------------
 
-# No Anthropic API in this deployment — route to the providers actually available
-# (NVIDIA NIM primary for reasoning, OpenRouter where configured, Ollama local).
+# No Anthropic API in this deployment. DeepSeek (paid, OpenAI-compatible) is the
+# primary reasoning/codegen provider; NVIDIA NIM and OpenRouter are cloud fallbacks,
+# Ollama is the local/air-gap embedding+fallback. Note: agent roles pin their own
+# provider via override_provider, so this table is mainly the no-override default.
 DEFAULT_ROUTING: dict[TaskType, Provider] = {
-    TaskType.RULE_INFERENCE:     Provider.NVIDIA_NIM,
-    TaskType.HYPOTHESIS_GEN:     Provider.NVIDIA_NIM,
+    TaskType.RULE_INFERENCE:     Provider.DEEPSEEK,
+    TaskType.HYPOTHESIS_GEN:     Provider.DEEPSEEK,
     TaskType.RAG_EMBEDDING:      Provider.OLLAMA,
-    TaskType.TEST_SUMMARIZATION: Provider.NVIDIA_NIM,
-    TaskType.REPORT_GENERATION:  Provider.NVIDIA_NIM,
-    TaskType.CODE_GENERATION:    Provider.NVIDIA_NIM,
-    TaskType.GRAPH_EXTRACTION:   Provider.NVIDIA_NIM,
+    TaskType.TEST_SUMMARIZATION: Provider.DEEPSEEK,
+    TaskType.REPORT_GENERATION:  Provider.DEEPSEEK,
+    TaskType.CODE_GENERATION:    Provider.DEEPSEEK,
+    TaskType.GRAPH_EXTRACTION:   Provider.DEEPSEEK,
 }
 
 AIR_GAP_ROUTING: dict[TaskType, Provider] = {task: Provider.OLLAMA for task in TaskType}
@@ -254,6 +274,7 @@ class LLMRouter:
         # Every task type must have a path to a working provider. No Anthropic here;
         # NVIDIA NIM leads (the reliable keyed provider), then OpenRouter, then local Ollama.
         self.fallback_chain = fallback_chain or [
+            Provider.DEEPSEEK,
             Provider.NVIDIA_NIM,
             Provider.OPENROUTER,
             Provider.OLLAMA,
@@ -280,6 +301,7 @@ class LLMRouter:
 
         # Anthropic intentionally excluded — not available in this deployment.
         providers = {
+            Provider.DEEPSEEK: DEEPSEEK_DEFAULT,
             Provider.OPENROUTER: OPENROUTER_DEFAULT,
             Provider.NVIDIA_NIM: NVIDIA_NIM_DEFAULT,
             Provider.OLLAMA: OLLAMA_DEFAULT,
@@ -287,7 +309,8 @@ class LLMRouter:
 
         # Re-read API keys at call time (robust if .env was loaded after this
         # module was imported), then disable providers with no key (Ollama needs none).
-        env_key = {Provider.OPENROUTER: "OPENROUTER_API_KEY",
+        env_key = {Provider.DEEPSEEK: "DEEPSEEK_API_KEY",
+                   Provider.OPENROUTER: "OPENROUTER_API_KEY",
                    Provider.NVIDIA_NIM: "NVIDIA_API_KEY"}
         for p, cfg in providers.items():
             if p in env_key:
@@ -403,6 +426,8 @@ class LLMRouter:
     async def _dispatch(self, cfg, task, messages, system, **kwargs) -> dict[str, Any]:
         if cfg.provider == Provider.ANTHROPIC:
             return await self._call_anthropic(cfg, messages, system, **kwargs)
+        if cfg.provider == Provider.DEEPSEEK:
+            return await self._call_deepseek(cfg, messages, system, **kwargs)
         if cfg.provider == Provider.OPENROUTER:
             return await self._call_openrouter(cfg, task, messages, system, **kwargs)
         if cfg.provider == Provider.NVIDIA_NIM:
@@ -431,6 +456,32 @@ class LLMRouter:
             "model": data.get("model", cfg.model),
             "input_tokens": data.get("usage", {}).get("input_tokens", 0),
             "output_tokens": data.get("usage", {}).get("output_tokens", 0),
+            "raw": data,
+        }
+
+    # ------------------------------------------------------------------ DeepSeek
+    async def _call_deepseek(self, cfg, messages, system, **kwargs) -> dict[str, Any]:
+        """DeepSeek's OpenAI-compatible Chat Completions endpoint (paid, primary)."""
+        headers = {"Authorization": f"Bearer {cfg.api_key}",
+                   "Content-Type": "application/json", **cfg.extra_headers}
+        msgs = ([{"role": "system", "content": system}] if system else []) + messages
+        payload = {
+            "model": kwargs.get("model", cfg.model),
+            "messages": msgs,
+            "max_tokens": kwargs.get("max_tokens", cfg.max_tokens),
+            "temperature": kwargs.get("temperature", cfg.temperature),
+            "stream": False,
+        }
+        async with httpx.AsyncClient(timeout=cfg.timeout) as client:
+            resp = await client.post(cfg.base_url, headers=headers, json=payload)
+            resp.raise_for_status()
+            data = resp.json()
+        usage = data.get("usage", {})
+        return {
+            "content": _extract_message_text(data),     # tolerant of reasoning_content
+            "model": data.get("model", cfg.model),
+            "input_tokens": usage.get("prompt_tokens", 0),
+            "output_tokens": usage.get("completion_tokens", 0),
             "raw": data,
         }
 

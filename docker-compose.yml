@@ -1,10 +1,14 @@
 # VENOM — Docker Compose
 #
-# VENOM is a CLI tool, not a long-running server, so you typically use
-# `docker compose run` rather than `up`:
+# One command starts the web console (it is self-contained — launched engagements
+# run in-process against the bundled VulnLab, so no other service is required):
 #
-#   docker compose build
-#   docker compose run --rm venom scope --scope examples/scope.json
+#   docker compose up --build        # -> console http://localhost:8080
+#
+# Everything else is opt-in (excluded from a plain `up`):
+#
+#   docker compose up vulnlab                  # standalone VulnLab target -> :8000 (explicit)
+#   docker compose run --rm venom scope --scope examples/scope.json   # one-shot CLI
 #   docker compose run --rm venom run   --scope examples/scope.json --in examples/
 #
 # For LOCAL / AIR-GAPPED LLM, start Ollama alongside it:
@@ -19,7 +23,28 @@
 name: venom
 
 services:
+  # Web console — the VENOM UI over the real engine. Launching an engagement runs
+  # in-process against the bundled VulnLab (no LLM key required); the vulnlab
+  # service below is the same target exposed live for CLI hunts / browsing.
+  venom-web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: venom-agent:0.1.0
+    entrypoint: ["venom"]
+    command: ["web", "--host", "0.0.0.0", "--port", "8080"]
+    env_file:
+      - path: .env
+        required: false
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./venom_data:/data                  # persisted run artifacts + engagement rows
+
+  # CLI helper — opt-in (runs once and exits, so it is excluded from `up`).
+  # Use it via:  docker compose run --rm venom <args>
   venom:
+    profiles: ["cli"]
     build:
       context: .
       dockerfile: Dockerfile
@@ -37,11 +62,14 @@ services:
       - ./engagements:/engagements:ro       # drop your own scope.json + artifacts here
     # CLI default; override per invocation with `docker compose run --rm venom <args>`
     command: ["--help"]
-    depends_on: []
 
   # Deliberately-vulnerable target for exercising the autonomous agent end-to-end.
-  # `docker compose up -d vulnlab` then hunt http://localhost:8000.
+  # Opt-in (the console does NOT need it — it runs VulnLab in-process). Start it
+  # explicitly to browse the live target or run CLI hunts against it:
+  #   docker compose up vulnlab           # or: docker compose --profile target up
+  #   docker compose run --rm venom hunt http://vulnlab:8000
   vulnlab:
+    profiles: ["target"]
     build:
       context: .
       dockerfile: Dockerfile

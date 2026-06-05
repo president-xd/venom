@@ -108,14 +108,14 @@ venom/                         # the product (importable package `venom`)
     web_playbooks.py playbooks.py generator.py
   inference/ memory/ rag/ report/ integrations/ prompts/ data/
 
-vulnlab/                       # our OWN deliberately-vulnerable test app (11 labs, easy->hard)
+vulnlab/                       # our OWN deliberately-vulnerable test app (37 labs, easy->hard)
   labs.py                      # Lab registry: handlers + metadata (objective/win_action/difficulty) ⭐
   app.py                       # shared login/index + dispatch; MockTransport + real http.server
 
 scripts/
-  eval_vulnlab.py              # end-to-end: drive oneshot_hunt against all 11 labs; scorecard
+  eval_vulnlab.py              # end-to-end: drive oneshot_hunt against all 37 labs; scorecard
 
-tests/                         # pytest; asyncio_mode=auto. 127+ tests. THE proof of correctness.
+tests/                         # pytest; asyncio_mode=auto. 220+ tests. THE proof of correctness.
 ```
 
 ⭐ = the files you will most often need to understand. Read them before editing nearby code.
@@ -188,22 +188,27 @@ multi-line code. Fenced blocks are far more reliable. Keep it that way.
 
 ## 7. VulnLab — our own proving ground (`vulnlab/`)
 
-A single deliberately-vulnerable app with **11 real, exploitable labs** (no fake
+A single deliberately-vulnerable app with **37 real, exploitable labs** (no fake
 banners — each `solved` flag flips only on the genuine exploit). Registry lives in
 `vulnlab/labs.py` (one source of truth: handler + metadata).
 
-| Tier | Labs | Flaw |
-|------|------|------|
-| easy | price, idor, coupon | client-trusted price; IDOR token theft; coupon reuse (no idempotency) |
-| medium | pin, mass, negqty, workflow | PIN brute (loop); mass assignment; negative-qty balancing; payment-skip |
-| hard | trustid, io, money, reg | trusted-identity takeover; int-overflow total; gift-card arbitrage; email truncation |
+The 37 labs span three batches (all in `vulnlab/labs.py`): the original 11
+(price, idor, coupon, pin, mass, negqty, workflow, trustid, io, money, reg);
+enterprise I+II (jwt, bola, reset, refund, bank, tenant, scope, billing, loyalty,
+invoice, twofa, records, files, deploy, referral); and enterprise III — realistic
+new surfaces (graphql, cookie, selfapprove, stack, fx, iam, receipt, batch,
+license, headerip, quota). Flaw classes cover client-trust, IDOR/BOLA, BFLA,
+mass-assignment, trusted-identity/-param, integer-overflow, brute-force, JWT
+alg:none, token/secret disclosure & forgery, replay, segregation-of-duties,
+network-trust headers, and economic abuse (coupon/loyalty/billing/fx/referral).
 
-- 5 labs use the **differential oracle** (delete-carlos style), 6 use the **marker**
-  oracle (economic wins) — both modes are exercised on purpose.
+- Both oracle modes are exercised on purpose: a **differential** win action
+  (delete/remove carlos style) for access-control labs, and an operator **marker**
+  for economic wins.
 - Exposed two ways from the same pure `handle()`: `make_transport()` (in-process
   `httpx.MockTransport` for tests) and `serve()` (real `http.server` for Docker/live).
 - **Every lab has a human-authored solving exploit + negative test** in
-  `tests/test_vulnlab_labs.py` (30 tests). That is the baseline the LLM is measured against.
+  `tests/test_vulnlab_labs.py`. That is the baseline the LLM is measured against.
 - Run the model against all of them: `python scripts/eval_vulnlab.py` (needs VulnLab
   serving on :8000 and an LLM provider configured).
 
@@ -215,10 +220,11 @@ in the eval scorecard.
 
 ## 8. LLM providers & models (`venom/llm/providers.py`, `.env`)
 
-- **Providers:** `NVIDIA_NIM`, `OPENROUTER`, `OLLAMA` (local). Anthropic is removed
-  (no key) — do not reintroduce it.
-- **Fallback chain:** NVIDIA → OpenRouter → Ollama, with throttle (RPM) and 429
-  same-provider retry. Robust JSON parsing handles reasoning-model
+- **Providers:** `DEEPSEEK` (paid primary, OpenAI-compatible — `deepseek-chat`/
+  `deepseek-reasoner`), `NVIDIA_NIM`, `OPENROUTER`, `OLLAMA` (local). All agent
+  roles default to `deepseek-chat`. Anthropic is removed (no key) — do not reintroduce it.
+- **Fallback chain:** DeepSeek → NVIDIA → OpenRouter → Ollama, with throttle (RPM)
+  and 429 same-provider retry. Robust JSON parsing handles reasoning-model
   `content`/`reasoning_content`/`tool_calls`.
 - **Air-gap mode** (`LLM_AIR_GAP=true`): forces Ollama-only; nothing leaves the box.
 - **Local model reality (proven, be honest about it):** on typical hardware (e.g.
@@ -254,7 +260,7 @@ in the eval scorecard.
 
 ```bash
 # Tests (the real proof). asyncio_mode=auto, testpaths=tests.
-python -m pytest -q                       # full suite (expect ~127 passed, 2 skipped)
+python -m pytest -q                       # full suite (expect ~220 passed, 2 skipped)
 python -m pytest tests/test_vulnlab_labs.py -q   # the 11-lab ground-truth proofs
 
 # CLI (entry point: `venom` == venom.cli:main)
@@ -265,7 +271,7 @@ python -m venom hunt --url ...            # iterative autonomous agent
 
 # VulnLab end-to-end eval (start the app first, then run the harness)
 python -m vulnlab.app                     # serve on :8000 (or `docker compose up vulnlab`)
-python scripts/eval_vulnlab.py            # scorecard across all 11 labs
+python scripts/eval_vulnlab.py            # scorecard across all 37 labs
 python scripts/eval_vulnlab.py price mass # subset
 ```
 

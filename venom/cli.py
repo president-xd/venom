@@ -7,6 +7,7 @@ VENOM command-line interface.
   venom agents   [--ping]                     Show the multi-agent model fleet
   venom burp     [--status]                   Burp MCP status / setup instructions
   venom run      --scope FILE --in ... [opts] Full engagement (dry-run by default)
+  venom web      [--host --port --open]        Web console (UI over the real engine)
 
 Safety: `run` is DRY-RUN by default (no requests are sent). Pass --live to send
 real requests — only allowed within the authorized scope, and the scope guard
@@ -279,6 +280,21 @@ def _cmd_oneshot(args) -> int:
     return 0
 
 
+def _cmd_web(args) -> int:
+    """Launch the VENOM console — a local web UI over the real engine. Launching
+    an engagement from the UI runs in-process against the bundled VulnLab."""
+    from .web import serve
+
+    if args.open:
+        import threading
+        import webbrowser
+
+        url = f"http://{'127.0.0.1' if args.host in ('0.0.0.0', '::') else args.host}:{args.port}"
+        threading.Timer(1.0, lambda: webbrowser.open(url)).start()
+    serve(host=args.host, port=args.port)
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="venom", description="VENOM business-logic pentest agent")
     p.add_argument("--log-level", default=None, help="DEBUG|INFO|WARNING|ERROR")
@@ -345,6 +361,12 @@ def build_parser() -> argparse.ArgumentParser:
     o.add_argument("--max-llm-calls", type=int, default=3, help="Hard cap on synthesis calls (default 3)")
     o.add_argument("--out", default=None, help="Directory to write exploit.py")
     o.set_defaults(func=_cmd_oneshot)
+
+    w = sub.add_parser("web", help="Launch the VENOM web console (UI over the real engine)")
+    w.add_argument("--host", default="127.0.0.1", help="Bind host (default 127.0.0.1)")
+    w.add_argument("--port", type=int, default=8080, help="Bind port (default 8080)")
+    w.add_argument("--open", action="store_true", help="Open the console in a browser")
+    w.set_defaults(func=_cmd_web)
     return p
 
 

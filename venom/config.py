@@ -37,6 +37,10 @@ class Settings:
     multi_agent: bool = _as_bool(os.getenv("VENOM_MULTI_AGENT"), True)
     # Per-engagement token ceiling for the autonomous agent loop.
     agent_token_budget: int = int(os.getenv("VENOM_AGENT_TOKEN_BUDGET", "300000"))
+    # Coverage campaign — how WIDE the multi-objective hunt goes. The agent decomposes
+    # the surface into N forbidden-action targets and hunts each (never stops at one).
+    campaign_max_targets: int = int(os.getenv("VENOM_CAMPAIGN_MAX_TARGETS", "10"))
+    campaign_per_target_calls: int = int(os.getenv("VENOM_CAMPAIGN_PER_TARGET_CALLS", "3"))
 
     # Burp MCP — KEYLESS. The MCP Server extension runs locally inside Burp and
     # exposes a loopback SSE endpoint; no API key is needed or used.

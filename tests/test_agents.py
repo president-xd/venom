@@ -16,22 +16,24 @@ def _default(role):
 
 
 def test_base_model_is_deepseek():
-    assert _default(AgentRole.ORCHESTRATOR).startswith("deepseek-ai/deepseek-v4")
-    assert _default(AgentRole.REPORTER).startswith("deepseek-ai/deepseek-v4")
+    # The fleet runs on DeepSeek's paid OpenAI-compatible API (deepseek-chat = V3).
+    assert _default(AgentRole.ORCHESTRATOR) == "deepseek-chat"
+    assert _default(AgentRole.REPORTER) == "deepseek-chat"
 
 
 def test_fleet_assignments():
-    assert _default(AgentRole.RESEARCH) == "z-ai/glm-5.1"
-    assert _default(AgentRole.HYPOTHESIS) == "moonshotai/kimi-k2.6"
-    # CODEGEN drives the autonomous agent brain — Llama-4 Maverick is the verified
-    # fast/clean codegen path on NVIDIA NIM (deepseek-v4-pro hangs on NIM, 2026-06-04).
-    assert _default(AgentRole.CODEGEN) == "meta/llama-4-maverick-17b-128e-instruct"
-    assert _default(AgentRole.SUMMARIZER) == "qwen/qwen3.5-397b-a17b"
+    # All roles default to deepseek-chat; any role is upgradable to deepseek-reasoner
+    # via its VENOM_MODEL_<ROLE> env var.
+    assert _default(AgentRole.RESEARCH) == "deepseek-chat"
+    assert _default(AgentRole.HYPOTHESIS) == "deepseek-chat"
+    # CODEGEN drives the autonomous agent brain (oneshot) on DeepSeek V3.
+    assert _default(AgentRole.CODEGEN) == "deepseek-chat"
+    assert _default(AgentRole.SUMMARIZER) == "deepseek-chat"
     # resolve_models() honors .env overrides — that's the intended behavior.
 
 
-def test_all_agents_route_through_nim():
-    assert all(spec.provider == Provider.NVIDIA_NIM for spec in DEFAULT_AGENTS.values())
+def test_all_agents_route_through_deepseek():
+    assert all(spec.provider == Provider.DEEPSEEK for spec in DEFAULT_AGENTS.values())
 
 
 def test_env_override(monkeypatch):
@@ -83,21 +85,22 @@ def test_agent_forces_its_model_and_provider():
     parsed = asyncio.run(agent.complete_json("test", schema_hint="{}"))
     assert parsed == {"ok": True}
     call = router.calls[-1]
-    assert call["provider"] == Provider.NVIDIA_NIM
-    assert call["model"] == "moonshotai/kimi-k2.6"
+    assert call["provider"] == Provider.DEEPSEEK
+    assert call["model"] == "deepseek-chat"
 
 
-def test_orchestrator_disabled_without_nim_key():
+def test_orchestrator_disabled_without_any_key():
+    # No DeepSeek/NVIDIA/OpenRouter key and not air-gapped -> offline pipeline.
     router = _StubRouter(nim_enabled=False)
     orch = build_orchestrator(router)
     assert orch is not None
     assert orch.enabled is False  # falls back to offline pipeline
 
 
-def test_orchestrator_enabled_with_nim():
+def test_orchestrator_enabled_with_provider():
     orch = build_orchestrator(_StubRouter(nim_enabled=True))
     assert orch.enabled is True
-    assert orch.agent(AgentRole.ORCHESTRATOR).model.startswith("deepseek-ai/deepseek-v4")
+    assert orch.agent(AgentRole.ORCHESTRATOR).model == "deepseek-chat"
 
 
 def test_codegen_and_summarizer_are_wired(monkeypatch):

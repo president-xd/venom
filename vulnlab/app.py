@@ -81,10 +81,12 @@ def make_transport(state: dict | None = None):
     st = state if state is not None else new_state()
 
     def _handler(req):
+        # Parse ALL cookies (real apps carry many; some labs use a custom identity cookie).
         cookies = {}
-        m = re.search(r"session=([^;]+)", req.headers.get("cookie", ""))
-        if m:
-            cookies["session"] = m.group(1)
+        for part in (req.headers.get("cookie", "") or "").split(";"):
+            if "=" in part:
+                k, v = part.strip().split("=", 1)
+                cookies[k] = v
         form = {k: v[0] for k, v in parse_qs(req.content.decode() if req.content else "").items()}
         headers = {k.lower(): v for k, v in req.headers.items()}
         status, body, set_cookie = handle(
@@ -107,9 +109,10 @@ def serve(host: str = "0.0.0.0", port: int = 8000):  # pragma: no cover - runtim
     class H(BaseHTTPRequestHandler):
         def _cookies(self):
             c = {}
-            m = re.search(r"session=([^;]+)", self.headers.get("Cookie", "") or "")
-            if m:
-                c["session"] = m.group(1)
+            for part in (self.headers.get("Cookie", "") or "").split(";"):
+                if "=" in part:
+                    k, v = part.strip().split("=", 1)
+                    c[k] = v
             return c
 
         def _do(self, method):

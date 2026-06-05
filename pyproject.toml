@@ -30,6 +30,7 @@ include = ["venom*"]
 [tool.setuptools.package-data]
 "venom.prompts" = ["*.md"]
 "venom.data" = ["wordlists/*.txt"]
+"venom.web" = ["ui/*"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

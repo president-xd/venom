@@ -42,6 +42,25 @@ _REMEDIATION = {
 }
 
 
+def _confirmation_method(case: TestCase, evidence: dict) -> str:
+    """Describe — truthfully — how this finding was proven, from its real evidence.
+    Never asserts a differential/state-delta where the evidence shows none."""
+    if evidence.get("differential") or evidence.get("exploit_code"):
+        return "differential oracle"
+    deltas = evidence.get("deltas") or {}
+    nbd = evidence.get("net_balance_delta") or 0
+    if (isinstance(nbd, (int, float)) and abs(nbd) > 1e-9) or any(abs(v or 0) > 1e-9 for v in deltas.values()):
+        return "state-delta differential"
+    if any(("body" in (s.success_condition or "")) or ("text" in (s.success_condition or ""))
+           for s in case.steps):
+        return "response-content match"
+    setup_ids = {s.who for s in case.setup_steps if s.who}
+    attack_ids = {s.who for s in case.steps if s.who}
+    if setup_ids and attack_ids and setup_ids != attack_ids:
+        return "cross-identity differential"
+    return "status response"
+
+
 def build_findings(cases: list[TestCase]) -> list[Finding]:
     findings: list[Finding] = []
     for c in cases:
@@ -70,6 +89,8 @@ def build_findings(cases: list[TestCase]) -> list[Finding]:
             remediation={"short_term": short, "long_term": long},
             references=(c.rag_refs or ([c.rag_source] if c.rag_source else [])),
             source_test_id=c.test_id,
+            origin=getattr(c, "origin", "") or "playbook",
+            confirmation=_confirmation_method(c, evidence),
         ))
     return findings
 
@@ -129,6 +150,9 @@ def _markdown(scope: Scope, registry: EndpointRegistry, cases: list[TestCase],
             f"|  **Endpoint:** `{f.affected_endpoint}`",
             "",
             f"**Business impact:** {f.business_impact}",
+            "",
+            f"**Confirmation:** {f.confirmation or 'evidence-based'} "
+            f"(origin: {f.origin or 'playbook'}) — proven, not a scanner signature.",
             "",
             f"**CVSS:** `{f.cvss_vector or 'n/a'}`",
             "",

@@ -210,8 +210,41 @@ class TestRunner:
                 return val
         return next(iter(deltas.values()), 0.0)
 
+    # Tokens whose presence in a success_condition means the verdict depends on
+    # real PROOF — response content (body/text) or a measured state delta — not
+    # merely on the server having RESPONDED. A bare `status in (200, 201)` proves
+    # only that a page/endpoint answered, which is never a business-logic win:
+    # that is exactly how a forgiving app (200 on every landing page) produced the
+    # historical false positives. See _judge.
+    _PROOF_TOKENS = ("body", "text", "net_balance_delta", "deltas",
+                     "_delta", "_after", "_before")
+
+    @staticmethod
+    def _has_cross_identity_differential(case) -> bool:
+        """True when the case provisions a resource as ONE identity and attacks it
+        as ANOTHER (victim creates, attacker reads). A success there is a genuine
+        cross-tenant differential, not just 'the server answered'."""
+        return any(s.who and a.who and s.who != a.who
+                   for s in case.setup_steps for a in case.steps)
+
     def _judge(self, case, step_ctxs, before, after, deltas, net_balance_delta, variables) -> Verdict:
-        any_success = False
+        """Decide the verdict, distinguishing PROVEN exploits from mere LEADS.
+
+        A success_condition that is met is only a CONFIRMED_EXPLOIT when the pass
+        is corroborated by hard evidence:
+          - a real state change (a non-zero balance/counter delta), OR
+          - a response-content assertion in the condition (body/text/delta), OR
+          - a cross-identity differential (provisioned as victim, abused as attacker).
+
+        A condition met by HTTP status alone — with no state change and no content
+        proof — is recorded as NEEDS_REVIEW (a lead for the agent/operator to
+        verify), NOT a confirmed finding. This is the enterprise rule the differential
+        oracle encodes: a 200 is not a vulnerability. It is what stops a landing-page
+        GET that returns 200 from being reported as an exploit."""
+        state_changed = abs(net_balance_delta) > 1e-9 or any(abs(v) > 1e-9 for v in deltas.values())
+        cross_identity = self._has_cross_identity_differential(case)
+        substantive = False
+        weak = False
         for step, ctx in step_ctxs:
             if not step.success_condition:
                 continue
@@ -230,13 +263,28 @@ class TestRunner:
                 **{f"{k}_after": v for k, v in after.items()},
                 **variables,
             }
-            if safe_eval(step.success_condition, ns):
-                any_success = True
+            if not safe_eval(step.success_condition, ns):
+                continue
+            content_backed = any(tok in step.success_condition for tok in self._PROOF_TOKENS)
+            if content_backed or state_changed or cross_identity:
+                substantive = True
                 case.notes.append(
-                    f"Step {step.step}: '{step.success_condition}' MET "
-                    f"(status={ctx.get('status')}, net_delta={net_balance_delta})"
+                    f"Step {step.step}: '{step.success_condition}' MET with corroboration "
+                    f"(status={ctx.get('status')}, net_delta={net_balance_delta}, "
+                    f"state_changed={state_changed}, cross_identity={cross_identity}) — CONFIRMED"
                 )
-        return Verdict.CONFIRMED_EXPLOIT if any_success else Verdict.FALSE_POSITIVE
+            else:
+                weak = True
+                case.notes.append(
+                    f"Step {step.step}: '{step.success_condition}' MET but status-only "
+                    f"(status={ctx.get('status')}, no state delta, no response-content proof) — "
+                    f"recorded as a LEAD requiring verification, NOT a confirmed exploit"
+                )
+        if substantive:
+            return Verdict.CONFIRMED_EXPLOIT
+        if weak:
+            return Verdict.NEEDS_REVIEW
+        return Verdict.FALSE_POSITIVE
 
     async def _run_cleanup(self, case: TestCase, variables: dict) -> None:
         for step in case.cleanup_steps:

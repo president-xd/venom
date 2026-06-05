@@ -36,16 +36,22 @@ class AgentSpec:
 
     def model(self) -> str:
         """Resolve the model, honoring the per-role env override and accepting
-        either a full NIM id or a catalog alias (e.g. 'kimi-k2.6')."""
+        either a full NIM id or a catalog alias (e.g. 'kimi-k2.6'). For non-NVIDIA
+        providers (e.g. DeepSeek) the alias map is a harmless pass-through."""
         return resolve_nvidia_model(os.getenv(self.env_var, self.default_model))
 
 
-# Base model for the fleet is DeepSeek (orchestrator + reporter). Subagents use
-# the model best matched to their task. All run through NVIDIA NIM.
+# The fleet runs on DeepSeek's paid, OpenAI-compatible API (the operator's
+# purchased key). `deepseek-chat` (V3) is fast and strong at codegen/reasoning;
+# upgrade any role to `deepseek-reasoner` (R1) via its env var for harder reasoning.
+# NVIDIA NIM / OpenRouter remain configured as automatic fallbacks in the router.
+_DS_CHAT = "deepseek-chat"
+
 DEFAULT_AGENTS: dict[AgentRole, AgentSpec] = {
     AgentRole.ORCHESTRATOR: AgentSpec(
         role=AgentRole.ORCHESTRATOR,
-        default_model="deepseek-ai/deepseek-v4-pro",
+        default_model=_DS_CHAT,
+        provider=Provider.DEEPSEEK,
         env_var="VENOM_MODEL_ORCHESTRATOR",
         description="Main coordinator: planning, business-model synthesis, decisions.",
         system_addendum=(
@@ -58,7 +64,8 @@ DEFAULT_AGENTS: dict[AgentRole, AgentSpec] = {
     ),
     AgentRole.RESEARCH: AgentSpec(
         role=AgentRole.RESEARCH,
-        default_model="z-ai/glm-5.1",
+        default_model=_DS_CHAT,
+        provider=Provider.DEEPSEEK,
         env_var="VENOM_MODEL_RESEARCH",
         description="Research: analyze domain docs, recall similar vulnerability patterns.",
         system_addendum=(
@@ -73,7 +80,8 @@ DEFAULT_AGENTS: dict[AgentRole, AgentSpec] = {
     ),
     AgentRole.HYPOTHESIS: AgentSpec(
         role=AgentRole.HYPOTHESIS,
-        default_model="moonshotai/kimi-k2.6",
+        default_model=_DS_CHAT,
+        provider=Provider.DEEPSEEK,
         env_var="VENOM_MODEL_HYPOTHESIS",
         description="Adversarial hypothesis generation via the five attack lenses.",
         system_addendum=(
@@ -87,10 +95,10 @@ DEFAULT_AGENTS: dict[AgentRole, AgentSpec] = {
     ),
     AgentRole.CODEGEN: AgentSpec(
         role=AgentRole.CODEGEN,
-        # Llama-4 Maverick returns clean fenced/JSON output fast on NVIDIA NIM and is
-        # the verified-working codegen path. (deepseek-v4-pro is listed on NIM but
-        # hangs — 200s+ ReadTimeout even on a 1-token prompt — verified 2026-06-04.)
-        default_model="meta/llama-4-maverick-17b-128e-instruct",
+        # DeepSeek V3 (deepseek-chat) drives `oneshot`: strong, fast code synthesis
+        # via the paid OpenAI-compatible API. Returns clean fenced ```python blocks.
+        default_model=_DS_CHAT,
+        provider=Provider.DEEPSEEK,
         env_var="VENOM_MODEL_CODEGEN",
         description="Generate concrete, executable test steps and payloads.",
         system_addendum=(
@@ -102,7 +110,8 @@ DEFAULT_AGENTS: dict[AgentRole, AgentSpec] = {
     ),
     AgentRole.SUMMARIZER: AgentSpec(
         role=AgentRole.SUMMARIZER,
-        default_model="qwen/qwen3.5-397b-a17b",
+        default_model=_DS_CHAT,
+        provider=Provider.DEEPSEEK,
         env_var="VENOM_MODEL_SUMMARIZER",
         description="Summarize test results cheaply and consistently.",
         system_addendum=(
@@ -113,7 +122,8 @@ DEFAULT_AGENTS: dict[AgentRole, AgentSpec] = {
     ),
     AgentRole.REPORTER: AgentSpec(
         role=AgentRole.REPORTER,
-        default_model="deepseek-ai/deepseek-v4-pro",
+        default_model=_DS_CHAT,
+        provider=Provider.DEEPSEEK,
         env_var="VENOM_MODEL_REPORTER",
         description="Final report prose — executive summary and remediation framing.",
         system_addendum=(

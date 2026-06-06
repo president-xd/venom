@@ -1,9 +1,12 @@
 /* ============================================================
-   VENOM — app shell: Sidebar + TopBar
+   VENOM - app shell: Sidebar + TopBar
    ============================================================ */
 
-function Sidebar({ route, go, findingCount, status }) {
+function Sidebar({ route, go, findingCount, status, user, onLogout }) {
   const killed = status && status.kill_switch;
+  const name = (user && user.name) || "Operator";
+  const role = (user && user.role) || "operator";
+  const initials = name.split(/\s+/).map((w) => w[0]).join("").slice(0, 2).toUpperCase() || "OP";
   const Item = ({ id, icon, label, count, target }) => (
     <button className={`sb-item ${route === id || (target && target.includes(route)) ? "active" : ""}`}
       onClick={() => go(id)}>
@@ -39,11 +42,16 @@ function Sidebar({ route, go, findingCount, status }) {
           <span>{killed ? "kill-switch ENGAGED" : "kill-switch ready"}</span>
         </div>
         <div className="sb-user">
-          <div className="sb-ava">AC</div>
-          <div>
-            <div className="nm">A. Chen</div>
-            <div className="rl">lead · authorized</div>
+          <div className="sb-ava">{initials}</div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div className="nm">{name}</div>
+            <div className="rl">{role} · authorized</div>
           </div>
+          {onLogout && (
+            <button className="sb-logout" title="Sign out" onClick={onLogout}>
+              <Ic name="logout" size={15} />
+            </button>
+          )}
         </div>
       </div>
     </aside>

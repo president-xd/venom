@@ -11,6 +11,8 @@ from venom.web import coverage
 from venom.web.coverage import vulnlab_coverage, _vuln_class
 from venom.testing.schema import Severity, TestCase, VulnClass, Verdict
 
+pytest.importorskip("vulnlab")   # coverage hunts the bundled VulnLab (dev-only, gitignored)
+
 
 def _lab(name):
     return SimpleNamespace(name=name, vuln_id="x", seeds=["/"], objective="o",

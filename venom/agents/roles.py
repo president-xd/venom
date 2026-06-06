@@ -35,16 +35,26 @@ class AgentSpec:
     temperature: float = 0.2
 
     def model(self) -> str:
-        """Resolve the model, honoring the per-role env override and accepting
-        either a full NIM id or a catalog alias (e.g. 'kimi-k2.6'). For non-NVIDIA
-        providers (e.g. DeepSeek) the alias map is a harmless pass-through."""
-        return resolve_nvidia_model(os.getenv(self.env_var, self.default_model))
+        """Resolve the model, honoring the per-role env override and accepting either
+        a full NIM id or a catalog alias (e.g. 'kimi-k2.6').
+
+        The NVIDIA alias catalog is applied ONLY for the NVIDIA provider. Applying it
+        provider-blind is NOT harmless: a model name that happens to be a catalog KEY -
+        most importantly 'deepseek-v4-pro' (the reasoner) - would be rewritten to its
+        NVIDIA id 'deepseek-ai/deepseek-v4-pro' and then rejected with HTTP 400 by
+        DeepSeek's own OpenAI-compatible API (which silently fails the call over to
+        Ollama). For DeepSeek/OpenRouter/Ollama the configured name is passed through."""
+        name = os.getenv(self.env_var, self.default_model)
+        if self.provider == Provider.NVIDIA_NIM:
+            return resolve_nvidia_model(name)
+        return name
 
 
 # The fleet runs on DeepSeek's paid, OpenAI-compatible API (the operator's
-# purchased key). `deepseek-chat` (V3) is fast and strong at codegen/reasoning;
-# upgrade any role to `deepseek-reasoner` (R1) via its env var for harder reasoning.
-# NVIDIA NIM / OpenRouter remain configured as automatic fallbacks in the router.
+# purchased key). `deepseek-chat` is fast and strong at codegen/reasoning; upgrade
+# any role to the heavier `deepseek-v4-pro` via its VENOM_MODEL_<ROLE> env var for
+# harder reasoning (`deepseek-reasoner` is only a legacy alias). NVIDIA NIM /
+# OpenRouter remain configured as automatic fallbacks in the router.
 _DS_CHAT = "deepseek-chat"
 
 DEFAULT_AGENTS: dict[AgentRole, AgentSpec] = {
@@ -55,7 +65,7 @@ DEFAULT_AGENTS: dict[AgentRole, AgentSpec] = {
         env_var="VENOM_MODEL_ORCHESTRATOR",
         description="Main coordinator: planning, business-model synthesis, decisions.",
         system_addendum=(
-            "You are the ORCHESTRATOR — the lead application-security engineer. "
+            "You are the ORCHESTRATOR - the lead application-security engineer. "
             "You synthesize the inputs from your research and hypothesis subagents "
             "into a coherent business model and an attack plan. Be rigorous, "
             "deterministic, and explicit about state and preconditions."
@@ -72,7 +82,7 @@ DEFAULT_AGENTS: dict[AgentRole, AgentSpec] = {
             "You are the RESEARCH agent. Given an endpoint registry and any domain "
             "documentation, surface the implicit business rules, tier/role policies, "
             "economic flows, and analogous real-world vulnerability classes worth "
-            "probing. Output concise, factual research notes — no speculation framed "
+            "probing. Output concise, factual research notes - no speculation framed "
             "as fact."
         ),
         primary_task=TaskType.RULE_INFERENCE,
@@ -125,7 +135,7 @@ DEFAULT_AGENTS: dict[AgentRole, AgentSpec] = {
         default_model=_DS_CHAT,
         provider=Provider.DEEPSEEK,
         env_var="VENOM_MODEL_REPORTER",
-        description="Final report prose — executive summary and remediation framing.",
+        description="Final report prose - executive summary and remediation framing.",
         system_addendum=(
             "You are the REPORTER. Write clear, business-risk-framed prose for a "
             "mixed audience (executives + engineers). No hype; quantify impact."

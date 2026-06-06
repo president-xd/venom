@@ -1,5 +1,5 @@
 """
-JSON API handlers — every one is backed by a REAL venom module (the knowledge
+JSON API handlers - every one is backed by a REAL venom module (the knowledge
 base, the agent fleet, the provider router, the scope guard). The dashboard
 shows only real runs you launch; nothing is mocked.
 """
@@ -16,7 +16,7 @@ from .runs import MANAGER, _data_dir
 
 __version__ = "0.1.0"
 
-# No seed/demo engagements — the dashboard shows only real runs you launch.
+# No seed/demo engagements - the dashboard shows only real runs you launch.
 DEMO_ENGAGEMENTS: list[dict] = []
 
 
@@ -108,14 +108,12 @@ def api_agents() -> dict:
 
 def api_providers() -> dict:
     from venom.llm import LLMRouter, Provider
-    names = {Provider.NVIDIA_NIM: "NVIDIA NIM", Provider.OPENROUTER: "OpenRouter",
-             Provider.OLLAMA: "Ollama (local)", Provider.ANTHROPIC: "Anthropic"}
+    names = {Provider.DEEPSEEK: "DeepSeek", Provider.NVIDIA_NIM: "NVIDIA NIM",
+             Provider.OPENROUTER: "OpenRouter", Provider.OLLAMA: "Ollama (local)"}
     out = []
     try:
         router = LLMRouter.from_env()
         for provider, cfg in router.providers.items():
-            if provider == Provider.ANTHROPIC:
-                continue  # removed from the fleet (no key path)
             configured = bool(cfg.api_key) or provider == Provider.OLLAMA
             out.append({"id": provider.value, "name": names.get(provider, provider.value),
                         "enabled": bool(cfg.enabled), "configured": configured,
@@ -152,14 +150,40 @@ def api_scope_validate(body: dict) -> dict:
     return {"ok": True, "summary": scope.summary()}
 
 
-def api_engagements() -> dict:
+# An engagement is visible to a user if they own it, or it is a legacy/demo row
+# (no real owner) so the bundled demo + pre-multi-user runs stay visible to everyone.
+_SHARED_OWNERS = {"You", "demo", "VENOM", "", None}
+
+
+def _owner_of(row: dict) -> str:
+    return row.get("owner") or ""
+
+
+def _visible_to(owner: str, user: str | None) -> bool:
+    return owner in _SHARED_OWNERS or (user is not None and owner == user)
+
+
+def run_visible_to(run_id: str, user: str | None) -> bool:
+    """Authorization for the per-run endpoints: a user may only read a run they own
+    (or a shared/demo run). Unknown runs are 'visible' so the handler can 404 itself."""
+    owner = MANAGER.owner_of(run_id)
+    if owner is None:
+        for e in DEMO_ENGAGEMENTS:
+            if e.get("id") == run_id:
+                return True
+        return True   # unknown -> let the status handler return its own 404
+    return _visible_to(owner, user)
+
+
+def api_engagements(user: str | None = None) -> dict:
     real = MANAGER.engagements()
     real_ids = {r.get("id") for r in real}
     rows = real + [e for e in DEMO_ENGAGEMENTS if e["id"] not in real_ids]
+    rows = [r for r in rows if _visible_to(_owner_of(r), user)]
     return {"engagements": rows}
 
 
-def api_start_run(body: dict) -> dict:
+def api_start_run(body: dict, user: str | None = None) -> dict:
     if _kill_switch_on():
         return {"error": "Kill switch engaged (VENOM_KILL_SWITCH); runs are halted."}
     opts = {
@@ -182,12 +206,14 @@ def api_start_run(body: dict) -> dict:
         "scope_paths": [p for p in (body.get("scope_paths") or []) if p],
         # operator-supplied login credentials so the agent can authenticate to the target
         "identities": [i for i in (body.get("identities") or []) if i.get("name")],
-        # inbox/exploit-server email URL — unlocks registration/email-parser flows
+        # inbox/exploit-server email URL - unlocks registration/email-parser flows
         "email_client_url": (body.get("email_client_url") or "").strip(),
-        # written authorization — supplied by the operator in the wizard
+        # written authorization - supplied by the operator in the wizard
         "authorized_by": (body.get("authorized_by") or "").strip(),
         "authorization_date": body.get("authorization_date") or "",
         "expiry_date": body.get("expiry_date") or "",
+        # owner = the logged-in operator, so each user sees only their own engagements
+        "owner": user or "operator",
     }
     run_id = MANAGER.start(opts)
     return {"id": run_id}

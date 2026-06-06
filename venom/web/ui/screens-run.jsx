@@ -1,5 +1,5 @@
 /* ============================================================
-   VENOM — Live agent run: pipeline tracker + streaming console
+   VENOM - Live agent run: pipeline tracker + streaming console
    Live mode (runId) streams a REAL engagement over SSE; without a
    runId it replays the scripted demo timeline.
    ============================================================ */
@@ -201,7 +201,7 @@ function LiveRun({ runId, onComplete, goFindings, finished, defaultSpeed = 2 }) 
                     <div className="body">
                       <div className="ps-t">{st.title}</div>
                       <div className="ps-d">{st.desc}</div>
-                      {state === "active" && <div className="ps-meta">working…</div>}
+                      {state === "active" && <div className="ps-meta">working...</div>}
                       {!live && state === "done" && order === 4 && <div className="ps-meta" style={{ color: "var(--sev-high)" }}>3 hypotheses confirmed</div>}
                       {live && done && order === 5 && <div className="ps-meta" style={{ color: "var(--sev-high)" }}>{findingsTotal} findings confirmed</div>}
                     </div>
@@ -215,7 +215,7 @@ function LiveRun({ runId, onComplete, goFindings, finished, defaultSpeed = 2 }) 
             <div className="eyebrow" style={{ marginBottom: 12 }}>Agent fleet</div>
             <div style={{ display: "flex", flexDirection: "column", gap: 9 }}>
               {(window.VENOM.FLEET && window.VENOM.FLEET.length ? window.VENOM.FLEET : []).map((a, k) => {
-                // The real fleet from /api/agents. Stage→role lighting: which roles are
+                // The real fleet from /api/agents. Stage->role lighting: which roles are
                 // active once the pipeline reaches infer/hypothesize/exploit.
                 const roleOrder = { research: 1, orchestrator: 2, hypothesis: 3, codegen: 4, summarizer: 5, reporter: 6 };
                 const on = currentOrder >= (roleOrder[a.role] || 1);

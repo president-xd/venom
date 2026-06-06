@@ -1,10 +1,10 @@
 """
-The engagement Objective — what "success" means, made checkable on ANY web app.
+The engagement Objective - what "success" means, made checkable on ANY web app.
 
 Real-world business-logic wins are not lab banners ("is-solved"). They are
 *state transitions*: a forbidden action becomes possible, a protected resource
 becomes reachable, a value changes that shouldn't. So the primary oracle is
-DIFFERENTIAL — it performs the win action and compares against a baseline taken
+DIFFERENTIAL - it performs the win action and compares against a baseline taken
 before exploitation:
 
     win  ==  (the win action FAILED as the un-escalated user)   [baseline]
@@ -15,7 +15,7 @@ where the operator EXPLICITLY describes success as a substring (success_text or
 win_signals). Crucially, there are NO product-baked default signals: VENOM never
 assumes a PortSwigger-style "is-solved" banner on an unknown app. If the operator
 defines neither a win_action nor a marker, the objective cannot be auto-confirmed
-(check() returns False) — an honest "unknown", not a false win.
+(check() returns False) - an honest "unknown", not a false win.
 """
 
 from __future__ import annotations
@@ -32,7 +32,7 @@ _SUCCESS_STATUS = (200, 201, 202, 204, 302, 303)
 class Objective:
     description: str = "achieve the engagement objective"
     # Primary, app-agnostic oracle: a concrete win action + what success looks like.
-    win_action: dict | None = None          # {"method","path","data"?} — the forbidden op
+    win_action: dict | None = None          # {"method","path","data"?} - the forbidden op
     success_status: tuple[int, ...] = _SUCCESS_STATUS
     success_text: str = ""                   # optional substring proving the op worked
     failure_text: str = ""                   # optional substring proving it was blocked
@@ -45,10 +45,19 @@ class Objective:
         a = self.win_action or {}
         method = (a.get("method") or "GET").upper()
         path = a.get("path") or self.win_url
+        data = a.get("data") or {}
         if method == "GET":
             r = await toolbox.http_get(path)
+        elif method == "POST":
+            r = await toolbox.http_post_form(path, data)
         else:
-            r = await toolbox.http_post_form(path, a.get("data") or {})
+            # Honor the operator's real verb (DELETE/PUT/PATCH/...) rather than
+            # silently downgrading it to POST - otherwise a RESTful win action can
+            # never be verified by the differential re-run. Fall back to POST only if
+            # a Toolbox-like object doesn't expose the generic verb method.
+            req = getattr(toolbox, "http_request", None)
+            r = await (req(method, path, data) if req is not None
+                       else toolbox.http_post_form(path, data))
         status = (r.data or {}).get("status")
         text = (toolbox.last_text or "").lower()
         ok = status in self.success_status
@@ -69,8 +78,8 @@ class Objective:
         """True if the EXPLOIT itself already performed the win action successfully.
 
         Re-running a bare win_action only proves SESSION-state escalation (role/2FA/
-        cookie). When the privilege is carried IN the winning request — e.g. a stolen
-        token/api-key in the body or header of a BOLA delete — the bare re-run is
+        cookie). When the privilege is carried IN the winning request - e.g. a stolen
+        token/api-key in the body or header of a BOLA delete - the bare re-run is
         denied even though the exploit succeeded. So we also accept the win if the
         exploit's own request trace shows the win-action path returning success (and,
         when defined, the operator's success_text). Still a sound differential: the
@@ -98,7 +107,7 @@ class Objective:
 
         Primary: the differential win action succeeds. Fallback: an operator-DEFINED
         marker (success_text / win_signals) appears at win_url. With neither defined
-        we return False — VENOM does not guess at success via baked-in lab strings."""
+        we return False - VENOM does not guess at success via baked-in lab strings."""
         if self.win_action:
             ok, _ = await self._run_win_action(toolbox)
             return ok

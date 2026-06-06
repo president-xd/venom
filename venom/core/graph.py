@@ -1,5 +1,5 @@
 """
-Business model graph — the agent's mental model of how the application is
+Business model graph - the agent's mental model of how the application is
 *supposed* to work. Four node types (Entity, Transition, Rule, Actor) plus
 explicit economic flows.
 
@@ -91,7 +91,7 @@ class BusinessModelGraph:
 
     def invalid_transition_paths(self, entity: str) -> list[tuple[str, str]]:
         """Every (from, to) pair among the entity's states that is NOT a declared
-        valid transition — these are the sequence-violation test candidates."""
+        valid transition - these are the sequence-violation test candidates."""
         ent = self.entities.get(entity)
         if not ent or len(ent.states) < 2:
             return []
@@ -103,7 +103,7 @@ class BusinessModelGraph:
         ]
 
     def faith_based_rules(self) -> list[Rule]:
-        """Rules documented but with no visible enforcement — primary targets."""
+        """Rules documented but with no visible enforcement - primary targets."""
         return [r for r in self.rules if r.enforced is False]
 
     def asymmetric_flows(self) -> list[EconomicFlow]:

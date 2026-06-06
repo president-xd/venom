@@ -33,7 +33,7 @@ BUILTIN_CORPUS: list[dict] = [
         "vuln_class": "BOLA_IDOR",
         "keywords": "graphql node id resolver nested idor user account",
         "technique": "Query node(id:) for a victim's global id; resolver skips per-object authz.",
-        "reference": "GraphQL IDOR — HackerOne GitLab reports",
+        "reference": "GraphQL IDOR - HackerOne GitLab reports",
     },
     {
         "title": "Mass assignment of is_admin during profile update",

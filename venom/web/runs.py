@@ -1,10 +1,12 @@
 """
-RunManager — launch a REAL ``run_engagement`` and surface its live trace + findings.
+RunManager - launch a REAL ``run_engagement`` and surface its live trace + findings.
 
-The engagement runs in-process against VulnLab's ``httpx.MockTransport`` (so it
-needs no network, no separate server and no LLM key — the deterministic
-``venom/flows`` + playbook engine confirms real findings with state-delta
-evidence; an LLM key, if present, additionally enables the agent loop).
+The bundled-VulnLab engagement runs in-process against ``httpx.MockTransport`` (no
+network and no separate target required). An LLM provider IS required, however:
+``_execute`` fails closed with a clear error if none is configured, because the
+live hunt reasons about the target with a model (recon -> infer -> hypothesize ->
+exploit -> verify). We do NOT silently degrade to a status-code scanner and present
+it as a real hunt. (Set ``DEEPSEEK_API_KEY`` or another provider in ``.env``.)
 
 Each run executes in its own thread; a logging handler scoped to that thread
 captures ``venom.*`` log records and turns them into console + pipeline events,
@@ -24,6 +26,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from .mappers import classify_log, findings_payload, stage_order
+from ..config import SETTINGS
 
 logger = logging.getLogger("venom.web")
 
@@ -62,6 +65,7 @@ class Run:
         self.id = run_id
         self.opts = opts
         self.target_name = opts.get("target_name") or "VulnLab"
+        self.owner = opts.get("owner") or "operator"
         self.target_url = opts.get("target_url") or "localhost:8000"
         self.status = "running"          # running | done | error
         self.out_dir = _data_dir() / run_id
@@ -139,7 +143,7 @@ class _LogCapture(logging.Handler):
                 line = line.strip()
                 if line:
                     self.run.push_log(line)
-        except Exception:  # noqa: BLE001 — logging must never raise
+        except Exception:  # noqa: BLE001 - logging must never raise
             pass
 
 
@@ -158,6 +162,29 @@ class RunManager:
         t.start()
         return run_id
 
+    def owner_of(self, run_id: str) -> str | None:
+        """The username that launched a run (None if unknown). Checked for per-run
+        authorization. Resolves from the live run, then the persisted engagements
+        index, then the saved trace."""
+        run = self.runs.get(run_id)
+        if run:
+            return run.owner
+        path = _data_dir() / "engagements.json"
+        if path.exists():
+            try:
+                for r in json.loads(path.read_text(encoding="utf-8")):
+                    if r.get("id") == run_id:
+                        return r.get("owner") or ""
+            except Exception:  # noqa: BLE001
+                pass
+        tj = _data_dir() / run_id / "trace.json"
+        if tj.exists():
+            try:
+                return (json.loads(tj.read_text(encoding="utf-8")).get("owner")) or ""
+            except Exception:  # noqa: BLE001
+                pass
+        return None
+
     def get(self, run_id: str) -> Run | None:
         return self.runs.get(run_id)
 
@@ -167,7 +194,7 @@ class RunManager:
         """The bundled VulnLab's real low-privileged test identities, used so the
         live hunt runs AUTHENTICATED (a senior tester escalates FROM a normal user;
         an anonymous crawl just collects 401s). These are genuine working creds for
-        the in-process demo target — not placeholder data."""
+        the in-process demo target - not placeholder data."""
         def form_login(user: str, pw: str) -> dict:
             return {"type": "form_login", "login_url": "/login", "method": "POST",
                     "username": user, "password": pw,
@@ -203,7 +230,7 @@ class RunManager:
         now = datetime.now(timezone.utc)
         o = run.opts
         objective = o.get("objective") or ""
-        # HONOR THE TARGET THE OPERATOR ENTERED — never hardcode the demo host.
+        # HONOR THE TARGET THE OPERATOR ENTERED - never hardcode the demo host.
         base = self._normalize_target(o.get("target_url") or run.target_url)
         bundled = self.is_bundled_target(base)
         base_urls = [base]
@@ -224,7 +251,7 @@ class RunManager:
         m = re.search(r"\bdelete\s+(?:the\s+)?(?:user\s+|account\s+)?([A-Za-z][A-Za-z0-9_.\-]{0,40})",
                       objective, re.I)
         if m:
-            # Strip trailing sentence punctuation — "delete carlos." must target
+            # Strip trailing sentence punctuation - "delete carlos." must target
             # 'carlos', not 'carlos.' (which deletes nobody and fails the lab).
             delete_user = m.group(1).rstrip(".,;:!?'\")")
         return {
@@ -253,7 +280,7 @@ class RunManager:
 
     @staticmethod
     def _build_meta(run: Run, provider: str, crawl: bool, think: bool) -> dict:
-        """Real engagement metadata for the enterprise report — no hardcoded values."""
+        """Real engagement metadata for the enterprise report - no hardcoded values."""
         o = run.opts
         sd = {}
         try:
@@ -275,8 +302,8 @@ class RunManager:
             "objective": o.get("objective") or "",
             "provider": provider,
             "engine": f"LLM-driven agent ({provider})",
-            "pipeline": "recon/crawl → business-model inference → adversarial hypotheses "
-                        "→ sandboxed exploit synthesis → differential verification",
+            "pipeline": "recon/crawl -> business-model inference -> adversarial hypotheses "
+                        "-> sandboxed exploit synthesis -> differential verification",
             "started": run.started.isoformat(),
         }
 
@@ -291,7 +318,6 @@ class RunManager:
 
         run.push({"t": "stage", "x": f"[scope] Loading engagement {run.id} · target {run.target_name}", "order": 0})
         try:
-            from vulnlab.app import make_transport
             from venom.engagement import run_engagement
             from venom.llm import LLMRouter
 
@@ -301,7 +327,7 @@ class RunManager:
             # The live engagement is an LLM-DRIVEN HUNT, in the senior-tester order:
             #   recon/crawl -> LLM business-model inference -> adversarial hypotheses
             #   -> LLM exploit synthesis (sandboxed) -> DIFFERENTIAL verification.
-            # An LLM provider is REQUIRED — we do not silently degrade to a
+            # An LLM provider is REQUIRED - we do not silently degrade to a
             # status-code scanner and dress the result up as a real hunt. If none is
             # configured we fail honestly so the operator knows nothing was reasoned.
             try:
@@ -326,8 +352,8 @@ class RunManager:
             run.meta = self._build_meta(run, provider, crawl, think)
             # Decide the TARGET and how we reach it. The bundled VulnLab demo runs
             # in-process (MockTransport); a REAL external target is hit over the
-            # network (transport=None → real httpx). We never silently swap one for
-            # the other — the engagement targets exactly what the operator entered.
+            # network (transport=None -> real httpx). We never silently swap one for
+            # the other - the engagement targets exactly what the operator entered.
             target = self._normalize_target(run.opts.get("target_url") or run.target_url)
             bundled = self.is_bundled_target(target)
             run.push_log(f"[scope] engine: LLM-driven hunt · provider {provider} · target {target} "
@@ -336,6 +362,15 @@ class RunManager:
                          f"exploit -> verify{' (--think)' if think else ''}")
 
             if bundled:
+                # The bundled demo target is VulnLab, a dev-only proving ground that is
+                # NOT shipped in the repo (see .gitignore). External targets do not need it.
+                try:
+                    from vulnlab.app import make_transport
+                except ModuleNotFoundError:
+                    raise RuntimeError(
+                        "The bundled VulnLab demo target is not installed (it is dev-only "
+                        "and excluded from the repo). Enter a real, authorized target URL "
+                        "instead of localhost:8000.")
                 transport, _ = make_transport()
             else:
                 transport = None   # real network HTTP, scope-guarded, to the entered host
@@ -345,11 +380,11 @@ class RunManager:
                 objective_text=run.opts.get("objective", ""), transport=transport,
             ))
 
-            # PER-LAB COVERAGE — ONLY for the bundled VulnLab demo. It hunts EACH lab
+            # PER-LAB COVERAGE - ONLY for the bundled VulnLab demo. It hunts EACH lab
             # in ISOLATION (fresh state, the lab's own oracle); the combined surface
             # can only confirm the most generic flaw because every lab's win-oracle
             # expects that lab alone. This is demo-target-specific and MUST NOT run
-            # against a real external target (it would re-target localhost) — the exact
+            # against a real external target (it would re-target localhost) - the exact
             # bug that made an external engagement hunt the wrong host.
             if bundled:
                 try:
@@ -357,11 +392,11 @@ class RunManager:
                     from venom.report import write_report
 
                     def _on_lab(name, solved, done, total, nsolved):
-                        run.push_log(f"[coverage] lab {done}/{total}: {name} — "
+                        run.push_log(f"[coverage] lab {done}/{total}: {name} - "
                                      f"{'CONFIRMED' if solved else 'not solved'}  "
                                      f"({nsolved} proven so far)")
 
-                    run.push_log("[coverage] hunting each bundled lab in isolation (fresh state per lab)…")
+                    run.push_log("[coverage] hunting each bundled lab in isolation (fresh state per lab)...")
                     cov_cases = asyncio.run(vulnlab_coverage(
                         self._scope_dict(run), concurrency=4,
                         per_lab_calls=SETTINGS.campaign_per_target_calls, on_lab=_on_lab))
@@ -374,7 +409,7 @@ class RunManager:
                         result.cases = merged
                         run.push_log(f"[coverage] {len(cov_cases)} additional vulnerability(ies) "
                                      f"proven across isolated labs")
-                except Exception as exc:  # noqa: BLE001 — coverage augments; never fails the run
+                except Exception as exc:  # noqa: BLE001 - coverage augments; never fails the run
                     logger.warning("per-lab coverage failed: %s", exc)
 
             findings_json = json.loads((run.out_dir / "findings.json").read_text(encoding="utf-8"))
@@ -419,7 +454,7 @@ class RunManager:
             "id": run.id, "name": run.target_name, "url": run.target_url,
             "status": "done", "crit": run.counts["crit"], "high": run.counts["high"],
             "med": run.counts["med"], "low": run.counts["low"],
-            "started": run.started.strftime("%Y-%m-%d %H:%M UTC"), "owner": "You", "live": True,
+            "started": run.started.strftime("%Y-%m-%d %H:%M UTC"), "owner": run.owner, "live": True,
             "authorized_by": run.opts.get("authorized_by") or "",
         })
         try:
@@ -433,7 +468,7 @@ class RunManager:
         trace = {
             "id": run.id, "status": run.status, "counts": run.counts,
             "findings": run.findings, "events": run.events, "meta": run.meta,
-            "authorized_by": run.opts.get("authorized_by") or "",
+            "authorized_by": run.opts.get("authorized_by") or "", "owner": run.owner,
             "target_name": run.target_name, "started": run.started.isoformat(),
         }
         try:
@@ -448,12 +483,12 @@ class RunManager:
             "id": run.id, "name": run.target_name, "url": run.target_url,
             "status": status, "crit": run.counts["crit"], "high": run.counts["high"],
             "med": run.counts["med"], "low": run.counts["low"],
-            "started": run.started.strftime("%Y-%m-%d %H:%M UTC"), "owner": "You",
+            "started": run.started.strftime("%Y-%m-%d %H:%M UTC"), "owner": run.owner,
             "live": True, "authorized_by": run.opts.get("authorized_by") or "",
         }
 
     def engagements(self) -> list[dict]:
-        """In-memory runs FIRST — including those still RUNNING — so a launched
+        """In-memory runs FIRST - including those still RUNNING - so a launched
         engagement appears on the dashboard immediately (not only once it finishes
         and is persisted). Persisted rows fill in past runs from earlier sessions."""
         rows: list[dict] = []

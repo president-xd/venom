@@ -1,5 +1,5 @@
 """
-VulnLab — a deliberately vulnerable app for exercising VENOM's autonomous agent.
+VulnLab - a deliberately vulnerable app for exercising VENOM's autonomous agent.
 
 ONE app, many independent business-logic flaw classes (see vulnlab/labs.py), each
 a REAL exploitable bug whose `solved` flag flips only on the genuine exploit. The
@@ -139,7 +139,7 @@ def serve(host: str = "0.0.0.0", port: int = 8000):  # pragma: no cover - runtim
         def log_message(self, *a):
             pass
 
-    print(f"VulnLab serving on {host}:{port} — labs: {', '.join(SOLVED_KEYS)}")
+    print(f"VulnLab serving on {host}:{port} - labs: {', '.join(SOLVED_KEYS)}")
     ThreadingHTTPServer((host, port), H).serve_forever()
 
 

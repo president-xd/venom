@@ -39,8 +39,8 @@ def safe_eval(condition: str, namespace: dict) -> bool:
     """Evaluate a boolean success condition with no access to real builtins.
 
     The namespace is merged into *globals* (not passed as locals) so that
-    generator expressions / comprehensions inside the condition — e.g.
-    `any(w in text for w in [...])` — can resolve free variables like `text`.
+    generator expressions / comprehensions inside the condition - e.g.
+    `any(w in text for w in [...])` - can resolve free variables like `text`.
     (In eval, a comprehension's own scope looks free names up in globals.)"""
     scope = {"__builtins__": _SAFE_BUILTINS, **namespace}
     try:
@@ -116,7 +116,7 @@ _SECRET_PATTERNS = [
 
 
 def redact_secrets(text):
-    """Strip provider API keys / bearer tokens from any string. Never disabled —
+    """Strip provider API keys / bearer tokens from any string. Never disabled -
     a secret must not reach logs or artifacts regardless of PII settings."""
     if not text:
         return text
@@ -135,6 +135,6 @@ class SecretLogFilter(logging.Filter):
             red = redact_secrets(msg)
             if red != msg:
                 record.msg, record.args = red, ()
-        except Exception:  # noqa: BLE001 — logging must never raise
+        except Exception:  # noqa: BLE001 - logging must never raise
             pass
         return True

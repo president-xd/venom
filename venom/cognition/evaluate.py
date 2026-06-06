@@ -3,7 +3,7 @@ Reliability measurement for the autonomous agent.
 
 LLM-driven hunts are non-deterministic, so "it solved it once" is not a capability
 claim. `success_rate` runs the same objective N times with fresh agent state and
-reports solved/total, success rate, and average steps — the number an operator
+reports solved/total, success rate, and average steps - the number an operator
 needs to trust (or reject) an autonomous run, and the metric to regression-track.
 """
 

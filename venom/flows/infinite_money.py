@@ -2,15 +2,15 @@
 Infinite-money flow ("infinite money logic flaw").
 
 A reusable discount coupon (revealed by newsletter sign-up) makes a gift card cost
-less than its redeemable face value. Each buy→redeem cycle nets the difference as
+less than its redeemable face value. Each buy->redeem cycle nets the difference as
 store credit, so credit can be grown without bound until an otherwise-unaffordable
 item (the jacket) is within reach.
 
-Chain: log in → sign up for the newsletter (scrape the coupon) → identify the gift
-card product and the expensive target → probe one cycle to measure the discounted
-price and face value *from store-credit deltas* (robust to cart markup) → buy gift
+Chain: log in -> sign up for the newsletter (scrape the coupon) -> identify the gift
+card product and the expensive target -> probe one cycle to measure the discounted
+price and face value *from store-credit deltas* (robust to cart markup) -> buy gift
 cards in bulk within current credit and redeem every code, growing credit until the
-target is affordable → buy the target → check the solved state. Request-heavy, so
+target is affordable -> buy the target -> check the solved state. Request-heavy, so
 it runs only as a purchase fallback.
 """
 
@@ -113,14 +113,14 @@ async def run(scope: Scope, registry, *, transport=None) -> list[TestCase]:
     try:
         home = await get("/")
         # The coupon is revealed on the sign-up confirmation page (the POST's
-        # redirect target, e.g. /?sign-up-confirmed=true) — capture that response.
+        # redirect target, e.g. /?sign-up-confirmed=true) - capture that response.
         su = await post("/sign-up", {"csrf": _csrf(home.text if home else ""), "email": "venom@money.lab"})
         conf = await get("/?sign-up-confirmed=true")
         blob = (home.text or "") + (su.text if su else "") + (conf.text if conf else "")
         m = _COUPON.search(blob)
         coupon = m.group(1).upper() if m else ""
         if not coupon:
-            logger.info("infinite-money: no coupon found — skipping")
+            logger.info("infinite-money: no coupon found - skipping")
             return []
 
         gc_id = None
@@ -130,13 +130,13 @@ async def run(scope: Scope, registry, *, transport=None) -> list[TestCase]:
                 gc_id = pid
                 break
         if gc_id is None:
-            logger.info("infinite-money: no gift-card product found — skipping")
+            logger.info("infinite-money: no gift-card product found - skipping")
             return []
 
         target_price = catalog[target_id]
         credit, _ = await credit_now()
         if credit is None:
-            logger.info("infinite-money: cannot read store credit — skipping")
+            logger.info("infinite-money: cannot read store credit - skipping")
             return []
         steps.append(TestStep(step=1, description=f"sign up (coupon {coupon}); gift card={gc_id}; "
                               f"start credit={credit}c; target {target_id}@{target_price}c",
@@ -152,7 +152,7 @@ async def run(scope: Scope, registry, *, transport=None) -> list[TestCase]:
         face = (after_redeem - after_buy) if (after_redeem is not None and after_buy is not None) else 0
         credit = after_redeem if after_redeem is not None else credit
         if unit <= 0 or face <= unit:
-            logger.info("infinite-money: no profit (unit=%dc face=%dc) — skipping", unit, face)
+            logger.info("infinite-money: no profit (unit=%dc face=%dc) - skipping", unit, face)
             return []
         logger.info("infinite-money: unit=%dc face=%dc profit=%dc/card; credit %dc target %dc",
                     unit, face, face - unit, credit, target_price)

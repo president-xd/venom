@@ -1,14 +1,14 @@
 """
 Workflow-sequence-skip flow ("insufficient workflow validation").
 
-A multi-step purchase (add to cart → checkout → pay → confirm) trusts that the
+A multi-step purchase (add to cart -> checkout -> pay -> confirm) trusts that the
 steps happen in order. If the final order-confirmation endpoint finalizes the
-order on its own — gated only by a success flag like `?order-confirmed=true` —
+order on its own - gated only by a success flag like `?order-confirmed=true` -
 a buyer can add an unaffordable item and jump straight to confirmation, skipping
 the payment/funds check entirely.
 
-Chain: log in → add the target (most-expensive) item to the cart → GET the
-order-confirmation endpoint with its success flag → check the solved state.
+Chain: log in -> add the target (most-expensive) item to the cart -> GET the
+order-confirmation endpoint with its success flag -> check the solved state.
 Runs only as a fallback when nothing cheaper already completed the purchase.
 """
 

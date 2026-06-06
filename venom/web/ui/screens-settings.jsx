@@ -1,5 +1,5 @@
 /* ============================================================
-   VENOM — Knowledge base + Settings (real data from /api)
+   VENOM - Knowledge base + Settings (real data from /api)
    ============================================================ */
 
 function KnowledgeAddForm({ onSaved, onCancel }) {
@@ -111,10 +111,13 @@ function KnowledgeBase() {
   );
 }
 
-function Settings() {
+function Settings({ t, setTweak, accents }) {
   const [providers, setProviders] = React.useState(null);
   const [fleet, setFleet] = React.useState(null);
   const [status, setStatus] = React.useState(window.VENOM_STATUS || null);
+  t = t || { theme: "auto", accent: "amber", density: "comfortable" };
+  setTweak = setTweak || (() => {});
+  accents = accents || [];
 
   React.useEffect(() => {
     if (!window.API) return;
@@ -136,11 +139,52 @@ function Settings() {
         <p className="sub">Model fleet, LLM providers, air-gap mode, audit keys and redaction; read live from this VENOM process.</p>
       </div>
 
+      {/* appearance — visible theme/accent/density controls (no hidden panel needed) */}
+      <div className="card card-pad" style={{ marginBottom: 14 }}>
+        <div className="eyebrow" style={{ marginBottom: 12 }}>Appearance</div>
+        <div className="row" style={{ gap: 28, flexWrap: "wrap", alignItems: "center" }}>
+          <div className="row gap10">
+            <span style={{ fontSize: 13, color: "var(--ink-2)", minWidth: 48 }}>Theme</span>
+            <div className="seg">
+              {["auto", "light", "dark"].map((v) => (
+                <button key={v} className={t.theme === v ? "on" : ""} onClick={() => setTweak("theme", v)}
+                  style={{ textTransform: "capitalize" }}>{v}</button>
+              ))}
+            </div>
+          </div>
+          <div className="row gap10">
+            <span style={{ fontSize: 13, color: "var(--ink-2)", minWidth: 48 }}>Density</span>
+            <div className="seg">
+              {["comfortable", "compact"].map((v) => (
+                <button key={v} className={t.density === v ? "on" : ""} onClick={() => setTweak("density", v)}
+                  style={{ textTransform: "capitalize" }}>{v}</button>
+              ))}
+            </div>
+          </div>
+          {accents.length > 0 && (
+            <div className="row gap10">
+              <span style={{ fontSize: 13, color: "var(--ink-2)", minWidth: 48 }}>Accent</span>
+              <div className="row gap6">
+                {accents.map((a) => (
+                  <button key={a.id} title={a.id} onClick={() => setTweak("accent", a.id)}
+                    style={{ width: 22, height: 22, borderRadius: "50%", background: a.swatch, cursor: "pointer",
+                      border: t.accent === a.id ? "2px solid var(--ink)" : "2px solid transparent",
+                      boxShadow: "0 0 0 1px var(--border-strong)" }} />
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+        <p className="muted" style={{ fontSize: 11.5, marginTop: 10, marginBottom: 0 }}>
+          Theme "auto" follows your operating system. Choices persist in this browser.
+        </p>
+      </div>
+
       <div className="detail-grid" style={{ gridTemplateColumns: "1fr 1fr" }}>
         {/* providers */}
         <div className="card card-pad">
           <div className="eyebrow" style={{ marginBottom: 12 }}>LLM providers</div>
-          {!providers && <div className="muted" style={{ fontSize: 13 }}>loading…</div>}
+          {!providers && <div className="muted" style={{ fontSize: 13 }}>loading...</div>}
           {providers && (providers.providers || []).length === 0 && (
             <div className="muted" style={{ fontSize: 13 }}>No providers configured. VENOM runs offline (deterministic playbooks + flows).</div>
           )}
@@ -160,7 +204,7 @@ function Settings() {
           </div>
           {providers && (
             <div className="row gap10" style={{ marginTop: 14, justifyContent: "space-between" }}>
-              <span className="muted" style={{ fontSize: 12 }}>Fallback chain: NVIDIA → OpenRouter → Ollama</span>
+              <span className="muted" style={{ fontSize: 12 }}>Fallback chain: NVIDIA -> OpenRouter -> Ollama</span>
               <span className={`pill ${providers.any_enabled ? "pill-done" : "pill-idle"}`}><span className="dot" />{providers.any_enabled ? "agent loop available" : "offline mode"}</span>
             </div>
           )}
@@ -201,7 +245,7 @@ function Settings() {
                 <td style={{ fontSize: 12, color: "var(--ink-2)" }}>{a.description}</td>
               </tr>
             ))}
-            {fleet === null && <tr><td colSpan={4} className="muted">loading…</td></tr>}
+            {fleet === null && <tr><td colSpan={4} className="muted">loading...</td></tr>}
           </tbody>
         </table>
       </div>

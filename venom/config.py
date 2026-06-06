@@ -37,12 +37,12 @@ class Settings:
     multi_agent: bool = _as_bool(os.getenv("VENOM_MULTI_AGENT"), True)
     # Per-engagement token ceiling for the autonomous agent loop.
     agent_token_budget: int = int(os.getenv("VENOM_AGENT_TOKEN_BUDGET", "300000"))
-    # Coverage campaign — how WIDE the multi-objective hunt goes. The agent decomposes
+    # Coverage campaign - how WIDE the multi-objective hunt goes. The agent decomposes
     # the surface into N forbidden-action targets and hunts each (never stops at one).
     campaign_max_targets: int = int(os.getenv("VENOM_CAMPAIGN_MAX_TARGETS", "10"))
     campaign_per_target_calls: int = int(os.getenv("VENOM_CAMPAIGN_PER_TARGET_CALLS", "3"))
 
-    # Burp MCP — KEYLESS. The MCP Server extension runs locally inside Burp and
+    # Burp MCP - KEYLESS. The MCP Server extension runs locally inside Burp and
     # exposes a loopback SSE endpoint; no API key is needed or used.
     burp_mcp_enabled: bool = _as_bool(os.getenv("BURP_MCP_ENABLED"), False)
     burp_mcp_url: str = os.getenv("BURP_MCP_URL", "http://127.0.0.1:9876/sse")
@@ -68,9 +68,11 @@ class Settings:
         return self.data_dir / "reports"
 
     def has_any_llm_key(self) -> bool:
+        # DeepSeek is the PRIMARY provider, so it must be counted here (the old list
+        # omitted it, wrongly reporting "no LLM" when only DeepSeek was configured).
         return any(
             os.getenv(k)
-            for k in ("ANTHROPIC_API_KEY", "OPENROUTER_API_KEY", "NVIDIA_API_KEY")
+            for k in ("DEEPSEEK_API_KEY", "OPENROUTER_API_KEY", "NVIDIA_API_KEY")
         ) or _as_bool(os.getenv("LLM_AIR_GAP"))  # air-gap implies local Ollama
 
 

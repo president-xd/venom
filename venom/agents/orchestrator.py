@@ -1,5 +1,5 @@
 """
-Orchestrator — the main agent (DeepSeek). It owns the subagent fleet and drives
+Orchestrator - the main agent (DeepSeek). It owns the subagent fleet and drives
 the reasoning stages of an engagement, delegating each stage to the agent whose
 model is best suited to it.
 
@@ -131,5 +131,5 @@ def build_orchestrator(router: LLMRouter | None) -> Orchestrator | None:
                    or (orr and orr.enabled) or getattr(router, "air_gap", False))
     agents = {role: Agent(spec, router) for role, spec in DEFAULT_AGENTS.items()}
     if not enabled:
-        logger.warning("No LLM provider configured — multi-agent fleet disabled (offline mode).")
+        logger.warning("No LLM provider configured - multi-agent fleet disabled (offline mode).")
     return Orchestrator(router, agents, enabled)

@@ -1,9 +1,9 @@
 """
-Adaptive reasoning layer — VENOM's autonomous "think before you exploit" loop.
+Adaptive reasoning layer - VENOM's autonomous "think before you exploit" loop.
 
 Instead of only firing pre-coded playbooks, the agent observes the target, takes
 cheap probes, reads the actual responses, re-thinks, and only then attempts an
-exploit — verifying from a model-independent oracle. The decision ("brain") is a
+exploit - verifying from a model-independent oracle. The decision ("brain") is a
 pluggable callable: an LLM in production, a deterministic stub in tests. Two entry
 points share the same toolbox/oracle/grounding:
   - `oneshot_hunt`: recon -> one (capped) synthesis call -> self-verified exploit,

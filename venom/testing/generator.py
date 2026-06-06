@@ -21,7 +21,7 @@ async def generate_test_cases(
     registry: EndpointRegistry,
     graph: BusinessModelGraph,
     router: LLMRouter | None = None,
-    hypothesis_agent=None,  # venom.agents.base.Agent — uses the Kimi subagent
+    hypothesis_agent=None,  # venom.agents.base.Agent - uses the Kimi subagent
     identities: list[str] | None = None,
 ) -> list[TestCase]:
     # Lazy import avoids a circular dependency (inference -> testing -> inference).
@@ -37,7 +37,7 @@ async def generate_test_cases(
     try:
         from ..rag import annotate_cases
         annotate_cases(cases)
-    except Exception:  # noqa: BLE001 — RAG is augmentation, never fatal
+    except Exception:  # noqa: BLE001 - RAG is augmentation, never fatal
         pass
 
     # De-duplicate by (class, endpoint, hypothesis prefix).

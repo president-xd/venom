@@ -1,5 +1,5 @@
 """
-VENOM web console server — std-lib ``http.server`` (no runtime dependency).
+VENOM web console server - std-lib ``http.server`` (no runtime dependency).
 
 Serves the React UI (``venom/web/ui``) and the JSON API, plus a Server-Sent
 Events stream of a live engagement's trace. Threaded so a long-lived SSE
@@ -48,6 +48,11 @@ class _Handler(BaseHTTPRequestHandler):
         self.send_response(status)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
+        # Baseline hardening for the operator console (MIME-sniffing, clickjacking,
+        # referrer leakage). Cheap and side-effect-free for a localhost SPA + JSON API.
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("X-Frame-Options", "DENY")
+        self.send_header("Referrer-Policy", "no-referrer")
         for k, v in (extra or {}).items():
             self.send_header(k, v)
         self.end_headers()
@@ -57,9 +62,15 @@ class _Handler(BaseHTTPRequestHandler):
             pass
 
     def _api(self, method: str, path: str, query: dict, body: dict) -> None:
+        cookie = self.headers.get("Cookie", "") or ""
+        extra: dict = {}
         try:
-            status, payload, ctype = routes.handle(method, path, query, body)
-        except Exception as exc:  # noqa: BLE001 — never 500 the whole server silently
+            result = routes.handle(method, path, query, body, cookie)
+            if len(result) == 4:        # (status, payload, ctype, extra_headers)
+                status, payload, ctype, extra = result
+            else:
+                status, payload, ctype = result
+        except Exception as exc:  # noqa: BLE001 - never 500 the whole server silently
             logger.exception("API error on %s %s", method, path)
             status, payload, ctype = 500, {"error": str(exc)}, "application/json"
         if isinstance(payload, (dict, list)):
@@ -68,7 +79,7 @@ class _Handler(BaseHTTPRequestHandler):
             data = payload.encode("utf-8")
         else:
             data = payload or b""
-        self._send(status, data, ctype)
+        self._send(status, data, ctype, extra or None)
 
     # -- SSE ------------------------------------------------------------------
     def _sse(self, run_id: str) -> None:
@@ -141,9 +152,16 @@ class _Handler(BaseHTTPRequestHandler):
 
 
 def serve(host: str = "127.0.0.1", port: int = 8080) -> None:  # pragma: no cover - runtime
+    from . import auth
+    seeded = auth.ensure_seed_user()
     httpd = ThreadingHTTPServer((host, port), _Handler)
     print(f"VENOM console serving on http://{host}:{port}  (UI: {UI_DIR})")
-    print("  Launch an engagement from the UI — it runs in-process against the bundled VulnLab.")
+    print("  Launch an engagement from the UI - it runs in-process against the bundled VulnLab.")
+    if seeded:
+        print(f"  Login created -> user: {seeded['username']}   password: {seeded['password']}")
+        print("  (set VENOM_WEB_USER / VENOM_WEB_PASSWORD to choose; add more via the API.)")
+    else:
+        print("  Login required. Use your existing operator account (users.json).")
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:

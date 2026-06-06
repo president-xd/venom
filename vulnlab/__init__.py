@@ -1,1 +1,1 @@
-"""VulnLab — deliberately vulnerable target app for autonomous-agent testing."""
+"""VulnLab - deliberately vulnerable target app for autonomous-agent testing."""

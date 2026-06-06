@@ -137,7 +137,7 @@ class AuthManager:
 
         if place == "cookie" or a.get("cookie_from_response"):
             state.cookies = {k: v for k, v in resp.cookies.items()}
-            logger.info("[auth] logged in '%s' — captured %d cookie(s)", ident.name, len(state.cookies))
+            logger.info("[auth] logged in '%s' - captured %d cookie(s)", ident.name, len(state.cookies))
             return state
 
         try:
@@ -154,7 +154,7 @@ class AuthManager:
         header = a.get("header", "Authorization")
         state.token = str(token)
         state.headers = {header: f"{scheme} {token}".strip()}
-        logger.info("[auth] logged in '%s' — token captured", ident.name)
+        logger.info("[auth] logged in '%s' - token captured", ident.name)
         return state
 
     async def _form_login_flow(self, ident: Identity) -> AuthState:
@@ -200,5 +200,5 @@ class AuthManager:
             raise ScopeError(
                 f"Form login failed for '{ident.name}' (status {code}, "
                 f"{len(cookies)} cookie(s)). Check creds/csrf_field/login_url.")
-        logger.info("[auth] form-logged in '%s' — captured %d cookie(s)", ident.name, len(cookies))
+        logger.info("[auth] form-logged in '%s' - captured %d cookie(s)", ident.name, len(cookies))
         return AuthState(cookies=cookies, is_login=True, obtained_at=time.time())

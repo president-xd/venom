@@ -10,6 +10,9 @@ import asyncio
 from venom.core.scope import Scope
 from venom.core.registry import EndpointRegistry, Endpoint
 from venom.cognition import oneshot_hunt, Objective
+
+import pytest
+pytest.importorskip("vulnlab")   # dev-only proving ground (gitignored); skip if absent
 from vulnlab.app import make_transport, new_state, PIN
 
 BASE = "https://vuln.local"

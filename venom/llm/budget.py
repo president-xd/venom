@@ -36,7 +36,7 @@ def trim(text: str | None, limit: int = MAX_CHARS) -> str | None:
         return text
     head = int(limit * 0.7)
     tail = max(0, limit - head - 40)
-    return f"{text[:head]}\n…[{len(text) - limit} chars trimmed]…\n{text[-tail:]}"
+    return f"{text[:head]}\n...[{len(text) - limit} chars trimmed]...\n{text[-tail:]}"
 
 
 def _form_skeleton(form_html: str) -> dict:

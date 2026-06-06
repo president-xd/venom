@@ -10,10 +10,10 @@ in the local part and re-parses the result. So an address like
 
 passes validation as '@company.tld' (privileged) while the mailer decodes
 '&AEA-'(@) and '&ACA-'(space), re-parses 'you@<your-inbox> ', and delivers the
-confirmation to YOUR inbox — letting you register a privileged account you control.
+confirmation to YOUR inbox - letting you register a privileged account you control.
 
-Chain: register the crafted address → read the confirmation link from the email
-client → confirm → log in → reach /admin → (opt-in) delete the objective user.
+Chain: register the crafted address -> read the confirmation link from the email
+client -> confirm -> log in -> reach /admin -> (opt-in) delete the objective user.
 """
 
 from __future__ import annotations
@@ -101,7 +101,7 @@ async def run(scope: Scope, registry, *, transport=None) -> list[TestCase]:
         reg_html = reg.text if reg else ""
         priv = (scope.privileged_email_domain or _scrape_priv(reg_html)).lower().rstrip(".")
         if not priv:
-            logger.info("email-parser: no privileged domain found — skipping")
+            logger.info("email-parser: no privileged domain found - skipping")
             return []
         email = _craft(local, inbox_domain, priv)
         steps.append(TestStep(step=1, description=f"GET /register (priv domain @{priv})",
@@ -118,7 +118,7 @@ async def run(scope: Scope, registry, *, transport=None) -> list[TestCase]:
         inbox = await mail.request("GET", ec.path or "/email", follow_redirects=True)
         link = _find_confirm(inbox.text if inbox else "", recipient, lab_host)
         if not link:
-            logger.info("email-parser: no confirmation link for %s — discrepancy failed", recipient)
+            logger.info("email-parser: no confirmation link for %s - discrepancy failed", recipient)
             return []
         cr = await lab.request("GET", _rel(link), follow_redirects=True)
         steps.append(TestStep(step=3, description="confirm via inbox link", method="GET",
@@ -159,10 +159,10 @@ async def run(scope: Scope, registry, *, transport=None) -> list[TestCase]:
             hypothesis=("Email parser discrepancy: the signup validator reads the literal domain "
                         f"(@{priv}) while the mailer decodes an RFC 2047 UTF-7 encoded-word in the "
                         "local part and delivers to an attacker inbox, so a privileged-domain "
-                        "account can be registered and controlled → admin access."),
+                        "account can be registered and controlled -> admin access."),
             risk_rating=Severity.CRITICAL,
             affected_endpoint="POST /register",
-            business_impact="Register a privileged (staff) account from an unauthorized domain → admin takeover.",
+            business_impact="Register a privileged (staff) account from an unauthorized domain -> admin takeover.",
             steps=steps,
             origin="flow",
             verdict=verdict,

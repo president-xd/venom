@@ -1,5 +1,5 @@
 """
-Mappers — translate real engine objects into the exact JSON shapes the React UI
+Mappers - translate real engine objects into the exact JSON shapes the React UI
 (``dESIGN/`` components) already expects, so the frontend is reused verbatim.
 
 Pure functions only (no I/O) so they are trivially unit-testable.
@@ -20,14 +20,14 @@ SEV_MAP = {
 VCLASS_META: dict[str, dict[str, str]] = {
     "BOLA_IDOR":          {"name": "Broken Object-Level Auth (BOLA / IDOR)", "cwe": "CWE-639", "owasp": "API1:2023"},
     "MASS_ASSIGNMENT":    {"name": "Mass-assignment privilege escalation",   "cwe": "CWE-915", "owasp": "API3:2023"},
-    "RACE_CONDITION":     {"name": "Race condition / TOCTOU",                "cwe": "CWE-362", "owasp": "—"},
-    "PARAM_POLLUTION":    {"name": "Client-side price & parameter tampering", "cwe": "CWE-602", "owasp": "—"},
+    "RACE_CONDITION":     {"name": "Race condition / TOCTOU",                "cwe": "CWE-362", "owasp": "n/a"},
+    "PARAM_POLLUTION":    {"name": "Client-side price & parameter tampering", "cwe": "CWE-602", "owasp": "n/a"},
     "PRIV_ESCALATION":    {"name": "Privilege escalation",                   "cwe": "CWE-269", "owasp": "API5:2023"},
-    "SEQUENCE_VIOLATION": {"name": "Workflow / sequence bypass",            "cwe": "CWE-840", "owasp": "—"},
-    "STATE_BYPASS":       {"name": "State / precondition bypass",           "cwe": "CWE-840", "owasp": "—"},
-    "TYPE_CONFUSION":     {"name": "Type confusion",                        "cwe": "CWE-843", "owasp": "—"},
-    "ECONOMIC_ABUSE":     {"name": "Economic abuse / arbitrage",           "cwe": "CWE-840", "owasp": "—"},
-    "FAITH_BASED_RULE":   {"name": "Faith-based business rule (unenforced)", "cwe": "CWE-840", "owasp": "—"},
+    "SEQUENCE_VIOLATION": {"name": "Workflow / sequence bypass",            "cwe": "CWE-840", "owasp": "n/a"},
+    "STATE_BYPASS":       {"name": "State / precondition bypass",           "cwe": "CWE-840", "owasp": "n/a"},
+    "TYPE_CONFUSION":     {"name": "Type confusion",                        "cwe": "CWE-843", "owasp": "n/a"},
+    "ECONOMIC_ABUSE":     {"name": "Economic abuse / arbitrage",           "cwe": "CWE-840", "owasp": "n/a"},
+    "FAITH_BASED_RULE":   {"name": "Faith-based business rule (unenforced)", "cwe": "CWE-840", "owasp": "n/a"},
 }
 
 _HTTP_METHODS = {"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"}
@@ -55,20 +55,20 @@ def _status_kind(status: Any) -> str:
 
 
 def _build_log(finding: dict) -> list[dict]:
-    """Request log rows for the evidence panel — from reproduction steps, falling
+    """Request log rows for the evidence panel - from reproduction steps, falling
     back to the runner's evidence['requests'] summaries."""
     rows: list[dict] = []
     for s in finding.get("reproduction_steps") or []:
         method = (s.get("method") or "GET").upper()
         path = s.get("path") or "/"
         status = s.get("actual_status") if s.get("actual_status") is not None else s.get("expected_status")
-        rows.append({"m": method, "p": path, "s": status if status is not None else "—",
+        rows.append({"m": method, "p": path, "s": status if status is not None else "-",
                      "note": s.get("description") or "", "kind": _status_kind(status)})
     if rows:
         return rows
     for r in (finding.get("evidence") or {}).get("requests", []) or []:
         m, p = _split_endpoint(r.get("summary") or "")
-        rows.append({"m": m, "p": p, "s": r.get("status", "—"), "note": "", "kind": _status_kind(r.get("status"))})
+        rows.append({"m": m, "p": p, "s": r.get("status", "-"), "note": "", "kind": _status_kind(r.get("status"))})
     return rows
 
 
@@ -91,8 +91,8 @@ def _build_state(finding: dict) -> dict | None:
         return None
     d = deltas.get(key) or 0
     sign = "+" if d >= 0 else ""
-    return {"label": key, "before": _fmt(before.get(key, "—")),
-            "after": _fmt(after.get(key, "—")), "note": f"{sign}{_fmt(d)}"}
+    return {"label": key, "before": _fmt(before.get(key, "-")),
+            "after": _fmt(after.get(key, "-")), "note": f"{sign}{_fmt(d)}"}
 
 
 def _fmt(v: Any) -> str:
@@ -102,13 +102,13 @@ def _fmt(v: Any) -> str:
 
 
 def _oracle_rows(confirmation: str, state: dict | None) -> list[dict]:
-    """Oracle-card rows that describe the ACTUAL confirmation method — not a canned
+    """Oracle-card rows that describe the ACTUAL confirmation method - not a canned
     differential story. Each row is literally true for the method used."""
     if confirmation == "differential oracle":
         return [
             {"ok": True, "t": "Baseline: the win action was DENIED to the un-escalated user"},
             {"ok": True, "t": "Post-exploit: the SAME action SUCCEEDED after the exploit ran"},
-            {"ok": True, "t": "Differential confirmed — the state transition proves the violation"},
+            {"ok": True, "t": "Differential confirmed - the state transition proves the violation"},
         ]
     if confirmation == "state-delta differential":
         what = f"{state['label']} ({state['note']})" if state else "a protected value"
@@ -124,11 +124,11 @@ def _oracle_rows(confirmation: str, state: dict | None) -> list[dict]:
     if confirmation == "response-content match":
         return [
             {"ok": True, "t": "The forbidden action returned its success / privileged content"},
-            {"ok": False, "t": "No state probe on this endpoint — confirmation is response-content based"},
+            {"ok": False, "t": "No state probe on this endpoint - confirmation is response-content based"},
         ]
     return [
         {"ok": True, "t": "The forbidden request was accepted (HTTP success)"},
-        {"ok": False, "t": "Status-level signal only — corroborate before treating as proven"},
+        {"ok": False, "t": "Status-level signal only - corroborate before treating as proven"},
     ]
 
 
@@ -139,7 +139,7 @@ def finding_to_ui(finding: dict) -> dict:
     agent actually authored one. Nothing is fabricated."""
     vc = finding.get("vulnerability_class", "")
     meta = VCLASS_META.get(vc, {"name": vc.replace("_", " ").title() or "Business-logic flaw",
-                                 "cwe": "CWE-840", "owasp": "—"})
+                                 "cwe": "CWE-840", "owasp": "-"})
     method, path = _split_endpoint(finding.get("affected_endpoint", ""))
     rem = finding.get("remediation") or {}
     remediation = [r for r in (rem.get("short_term"), rem.get("long_term")) if r]
@@ -149,9 +149,11 @@ def finding_to_ui(finding: dict) -> dict:
     confirmation = finding.get("confirmation") or "status response"
     state = _build_state(finding)
     impact = finding.get("business_impact") or finding.get("title", "")
+    description = finding.get("description") or finding.get("title", "") or impact
     return {
         "id": finding.get("finding_id", "BL-000"),
         "title": finding.get("title", "Business-logic finding"),
+        "description": description,         # full, untruncated technical explanation
         "vclass": meta["name"],
         "severity": SEV_MAP.get(finding.get("severity", "MEDIUM"), "med"),
         "cwe": meta["cwe"],
@@ -226,7 +228,7 @@ def classify_log(msg: str) -> str:
         return "req"
     if m.startswith("✓"):
         return "ok"
-    if m.startswith("lens=") or m.startswith("entit") or m.startswith("transition") or "→" in m:
+    if m.startswith("lens=") or m.startswith("entit") or m.startswith("transition") or "->" in m:
         return "think"
     return "info"
 

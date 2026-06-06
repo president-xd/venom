@@ -1,5 +1,5 @@
 /* ============================================================
-   VENOM — Findings list · Finding detail · Report
+   VENOM - Findings list · Finding detail · Report
    ============================================================ */
 
 function highlightPy(src) {
@@ -17,7 +17,7 @@ function highlightPy(src) {
 const SEV_ORDER = { crit: 0, high: 1, med: 2, low: 3, info: 4 };
 
 function FindingsList({ findings, openFinding, runId }) {
-  const all = findings || window.VENOM.FINDINGS;
+  const all = findings || window.VENOM.FINDINGS || [];
   const [filter, setFilter] = React.useState("all");
   const [q, setQ] = React.useState("");
 
@@ -64,7 +64,7 @@ function FindingsList({ findings, openFinding, runId }) {
         </div>
         <div className="search-in">
           <Ic name="search" />
-          <input placeholder="Filter by title, class, endpoint…" value={q} onChange={(e) => setQ(e.target.value)} />
+          <input placeholder="Filter by title, class, endpoint..." value={q} onChange={(e) => setQ(e.target.value)} />
         </div>
       </div>
 
@@ -96,7 +96,7 @@ function FindingsList({ findings, openFinding, runId }) {
 
 function FindingDetail({ finding, findings, back, openFinding }) {
   const f = finding;
-  const all = findings || window.VENOM.FINDINGS;
+  const all = findings || window.VENOM.FINDINGS || [];
   const idx = all.findIndex((x) => x.id === f.id);
 
   return (
@@ -125,7 +125,7 @@ function FindingDetail({ finding, findings, back, openFinding }) {
       <div className="detail-grid" style={{ marginTop: 22 }}>
         {/* ---- main ---- */}
         <div>
-          <p className="lede" style={{ marginTop: 0 }}>{f.summary}</p>
+          <p className="lede" style={{ marginTop: 0 }}>{f.description || f.summary}</p>
 
           {/* oracle */}
           <div className={`oracle-card ${f.confirmed ? "pass" : ""}`} style={{ marginTop: 18, background: f.confirmed ? "var(--ok-soft)" : "var(--surface-2)", borderColor: f.confirmed ? "oklch(0.82 0.08 152)" : "var(--border)" }}>
@@ -162,9 +162,9 @@ function FindingDetail({ finding, findings, back, openFinding }) {
             </div>
           </div>
 
-          {/* state delta — only when a value actually moved (no fabricated delta) */}
+          {/* state delta - only when a value actually moved (no fabricated delta) */}
           {f.state && (<>
-            <h2 className="h2" style={{ margin: "26px 0 12px" }}>State delta (before → after)</h2>
+            <h2 className="h2" style={{ margin: "26px 0 12px" }}>State delta (before -> after)</h2>
             <div className="evidence-block">
               <div className="state-delta">
                 <div className="state-box">
@@ -185,7 +185,7 @@ function FindingDetail({ finding, findings, back, openFinding }) {
             </div>
           </>)}
 
-          {/* exploit code — only when the agent actually authored one */}
+          {/* exploit code - only when the agent actually authored one */}
           {f.code
             ? (<>
                 <h2 className="h2" style={{ margin: "26px 0 12px" }}>
@@ -199,7 +199,7 @@ function FindingDetail({ finding, findings, back, openFinding }) {
                   <span className="row gap10" style={{ display: "inline-flex" }}><Ic name="flask" size={16} style={{ color: "var(--ink-3)" }} /> How it was confirmed</span>
                 </h2>
                 <p className="muted" style={{ fontSize: 12.5, marginTop: 0, marginBottom: 10 }}>
-                  No synthesized exploit script for this finding — it was confirmed deterministically via <b>{f.oracle}</b> ({f.origin}). The scope-guarded request log above is the evidence.
+                  This finding was proven by a deterministic <b>{f.origin}</b> exploit (not an LLM-written script), so there is no synthesized code to show. Confirmation method: <b>{f.oracle}</b>. The checks in the card above held, and the {(f.log || []).length}-step scope-guarded request log below records each request with its real HTTP status as the evidence. Replay those exact requests to reproduce it.
                 </p>
               </>)}
 
@@ -269,13 +269,13 @@ function methColor(m) {
 const SEV_COLOR = { crit: "var(--sev-crit)", high: "var(--sev-high)", med: "var(--sev-med)", low: "var(--ink-3)", info: "var(--ink-4)" };
 
 function fmtDate(iso) {
-  if (!iso) return "—";
+  if (!iso) return "-";
   const d = new Date(iso);
   return isNaN(d) ? String(iso).slice(0, 10) : d.toISOString().slice(0, 10);
 }
 
 function Report({ findings, runId, meta, openFinding }) {
-  const all = findings || window.VENOM.FINDINGS;
+  const all = findings || window.VENOM.FINDINGS || [];
   const confirmed = all.filter((f) => f.confirmed);
   const m = meta || {};
   const by = (s) => confirmed.filter((f) => f.severity === s).length;
@@ -286,7 +286,7 @@ function Report({ findings, runId, meta, openFinding }) {
 
   // Honest summary derived from the REAL confirmation methods.
   const methods = [...new Set(confirmed.map((f) => f.oracle).filter(Boolean))];
-  const authWindow = m.authorization_date ? `${fmtDate(m.authorization_date)} → ${fmtDate(m.expiry_date)}` : `${today} (24h)`;
+  const authWindow = m.authorization_date ? `${fmtDate(m.authorization_date)} -> ${fmtDate(m.expiry_date)}` : `${today} (24h)`;
   const kv = (k, v, mono) => (
     <div className="report-kv"><span className="k">{k}</span><span className={"v" + (mono ? " mono" : "")}>{v}</span></div>
   );
@@ -313,7 +313,7 @@ function Report({ findings, runId, meta, openFinding }) {
                 <span style={{ fontWeight: 700, letterSpacing: "0.14em" }}>VENOM</span>
               </div>
               <div style={{ fontSize: 22, fontWeight: 700, letterSpacing: "-0.01em" }}>Business-Logic Penetration Test</div>
-              <div style={{ fontSize: 13, color: "var(--ink-2)", marginTop: 6 }}>{m.target_name || "VulnLab"} — engagement report</div>
+              <div style={{ fontSize: 13, color: "var(--ink-2)", marginTop: 6 }}>{m.target_name || "VulnLab"} - engagement report</div>
             </div>
             <div style={{ textAlign: "right", fontSize: 12 }} className="mono">
               <div style={{ color: "var(--ink-3)" }}>{m.engagement_id || runId}</div>
@@ -326,11 +326,11 @@ function Report({ findings, runId, meta, openFinding }) {
           <h2 className="rh">1 · Executive summary</h2>
           <p className="lede">
             VENOM conducted an authorized, scope-guarded business-logic penetration test of <b>{m.target_name || "the target"}</b> ({m.base_url || "http://localhost:8000"}).
-            The engagement ran as an autonomous LLM-driven agent — reconnaissance, business-model inference, adversarial
-            hypothesis generation, sandboxed exploit synthesis, and differential verification — across <b>{m.tests_run || all.length}</b> test cases.
+            The engagement ran as an autonomous LLM-driven agent - reconnaissance, business-model inference, adversarial
+            hypothesis generation, sandboxed exploit synthesis, and differential verification - across <b>{m.tests_run || all.length}</b> test cases.
             It confirmed <b>{confirmed.length} business-logic {confirmed.length === 1 ? "finding" : "findings"}</b>
             {by("crit") + by("high") > 0 ? <> ({by("crit")} critical, {by("high")} high)</> : null}.
-            {methods.length ? <> Each finding was proven by {methods.join(", ")} — a concrete state transition or privileged action, not a scanner signature.</> : null}
+            {methods.length ? <> Each finding was proven by {methods.join(", ")} - a concrete state transition or privileged action, not a scanner signature.</> : null}
             {" "}Every outbound request passed the scope guard; the agent stopped at proof-of-concept and persisted no access.
           </p>
 
@@ -352,14 +352,14 @@ function Report({ findings, runId, meta, openFinding }) {
             <div>
               {kv("Target", m.target_name || "VulnLab")}
               {kv("Authorized base URL", m.base_url || "http://localhost:8000", true)}
-              {kv("Out of scope", (m.out_of_scope && m.out_of_scope.length ? m.out_of_scope.join(", ") : "—"), true)}
-              {kv("Authorized by", m.authorized_by || "—")}
+              {kv("Out of scope", (m.out_of_scope && m.out_of_scope.length ? m.out_of_scope.join(", ") : "-"), true)}
+              {kv("Authorized by", m.authorized_by || "-")}
             </div>
             <div>
               {kv("Window", authWindow, true)}
-              {kv("Rate limit", (m.rate_limit != null ? `${m.rate_limit} req/s` : "—") + (m.destructive ? " · destructive allowed" : " · non-destructive"), true)}
-              {kv("Identities", (m.identities && m.identities.length ? m.identities.join(", ") : "—"))}
-              {kv("Endpoints discovered", m.endpoints != null ? m.endpoints : "—", true)}
+              {kv("Rate limit", (m.rate_limit != null ? `${m.rate_limit} req/s` : "-") + (m.destructive ? " · destructive allowed" : " · non-destructive"), true)}
+              {kv("Identities", (m.identities && m.identities.length ? m.identities.join(", ") : "-"))}
+              {kv("Endpoints discovered", m.endpoints != null ? m.endpoints : "-", true)}
             </div>
           </div>
           {m.objective ? <p style={{ fontSize: 13, marginTop: 10 }}><b>Objective:</b> {m.objective}</p> : null}
@@ -375,7 +375,7 @@ function Report({ findings, runId, meta, openFinding }) {
               <tr><td style={{ fontWeight: 600 }}>Model inference</td><td>The LLM reconstructs the intended business model (entities, state machines, rules, economic flows).</td></tr>
               <tr><td style={{ fontWeight: 600 }}>Hypotheses</td><td>Adversarial hypotheses are generated per rule across the business-logic attack lenses.</td></tr>
               <tr><td style={{ fontWeight: 600 }}>Exploitation</td><td>The agent writes real exploit code, grounded to discovered endpoints, and runs it in the sandbox.</td></tr>
-              <tr><td style={{ fontWeight: 600 }}>Verification</td><td>A finding is confirmed only by a differential oracle (denied → succeeded), a measured state delta, or response-content proof — never a bare 2xx.</td></tr>
+              <tr><td style={{ fontWeight: 600 }}>Verification</td><td>A finding is confirmed only by a differential oracle (denied -> succeeded), a measured state delta, or response-content proof - never a bare 2xx.</td></tr>
             </tbody>
           </table>
 
@@ -411,14 +411,14 @@ function Report({ findings, runId, meta, openFinding }) {
                     <span className="fs-tag">{f.method} {f.path}</span>
                     <span className="fs-tag">{f.vclass}</span>
                     <span className="fs-tag">{f.cwe}</span>
-                    {f.owasp && f.owasp !== "—" ? <span className="fs-tag">OWASP {f.owasp}</span> : null}
+                    {f.owasp && f.owasp !== "-" ? <span className="fs-tag">OWASP {f.owasp}</span> : null}
                   </div>
                 </div>
                 <Sev s={f.severity} />
               </div>
 
               <p style={{ fontSize: 13, margin: "10px 0 6px" }}><b>Impact.</b> {f.impact}</p>
-              <p style={{ fontSize: 13, margin: "0 0 10px" }}><b>Confirmation.</b> Proven via <b>{f.oracle}</b> ({f.origin}). {f.state ? `Measured state change — ${f.state.label}: ${f.state.before} → ${f.state.after} (${f.state.note}).` : "Confirmed from the scope-guarded request log below."}</p>
+              <p style={{ fontSize: 13, margin: "0 0 10px" }}><b>Confirmation.</b> Proven via <b>{f.oracle}</b> ({f.origin}). {f.state ? `Measured state change - ${f.state.label}: ${f.state.before} -> ${f.state.after} (${f.state.note}).` : "Confirmed from the scope-guarded request log below."}</p>
 
               {/* request log */}
               <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--ink-3)", margin: "8px 0 4px", fontFamily: "var(--mono)" }}>Reproduction · scope-guarded trace</div>

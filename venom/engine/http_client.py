@@ -55,6 +55,13 @@ class ScopedClient:
         self.dry_run = dry_run
         self._limiter = limiter or RateLimiter(scope.rate_limit_per_second)
         # `transport` lets tests drive an in-memory target (httpx.MockTransport).
+        # event_hooks: re-run the scope guard on EVERY request httpx emits - crucially
+        # including redirect hops it follows internally. Without this, a single 30x to
+        # an out-of-scope host (a compromised/misbehaving target redirecting us off the
+        # authorized surface) would be followed with NO scope check, leaking the
+        # X-Pentest-ID and any auth headers/cookies off-scope. The hook fires BEFORE
+        # the request is sent, so it PREVENTS (not just detects) out-of-scope egress -
+        # upholding this module's invariant: no code path to the network bypasses scope.
         self._client = httpx.AsyncClient(
             timeout=30.0,
             headers={
@@ -63,8 +70,19 @@ class ScopedClient:
             },
             follow_redirects=False,
             transport=transport,
+            event_hooks={"request": [self._guard_request]},
         )
         self.request_log: list[dict] = []
+
+    async def _guard_request(self, request: "httpx.Request") -> None:
+        """httpx request hook: enforce the scope guard on every emitted request,
+        including followed redirects. Uses count_destructive=False so re-validating a
+        hop never double-charges the destructive budget already accounted for by the
+        originating request()."""
+        method = request.method.upper()
+        is_destructive = method in Scope.DESTRUCTIVE_METHODS
+        self.scope.assert_request_allowed(method, str(request.url),
+                                          destructive=is_destructive, count_destructive=False)
 
     async def __aenter__(self) -> "ScopedClient":
         return self
@@ -99,6 +117,13 @@ class ScopedClient:
         Set-Cookie issued by a subsequent login (httpx duplicate-cookie pitfall)."""
         self._client.cookies.clear()
 
+    def set_cookies(self, cookies: dict) -> None:
+        """Set cookies on the client jar (persisted across requests). Lets an exploit
+        forge a client-trusted identity cookie. Set on the instance - not per-request -
+        which is httpx's supported, non-deprecated path."""
+        for k, v in (cookies or {}).items():
+            self._client.cookies.set(k, str(v))
+
     def _full_url(self, path: str) -> str:
         return urljoin(self.base_url, path.lstrip("/"))
 
@@ -115,7 +140,7 @@ class ScopedClient:
         # destructive method (DELETE/PUT/PATCH).
         is_destructive = method.upper() in Scope.DESTRUCTIVE_METHODS or bool(destructive)
 
-        # HARD GATE — raises ScopeError if not allowed.
+        # HARD GATE - raises ScopeError if not allowed.
         self.scope.assert_request_allowed(method, url, destructive=is_destructive)
 
         entry = {

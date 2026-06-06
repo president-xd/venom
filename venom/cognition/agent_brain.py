@@ -19,15 +19,15 @@ from ..llm.budget import trim
 logger = logging.getLogger("venom.cognition.agent_brain")
 
 _SYSTEM = (
-    "You are VENOM's autonomous reasoning core — a senior application-security "
+    "You are VENOM's autonomous reasoning core - a senior application-security "
     "engineer with a toolbox, working memory, and a goal. THINK before you act: "
     "probe cheaply, read results, update memory, and only then exploit. If a "
     "strategy stalls (memory shows no progress), SWITCH to a different one. You are "
     "not limited to known patterns; reason from what you observe.\n"
     "OUTPUT RULES (critical): respond with ONE compact JSON object and NOTHING else "
-    "— no prose, no markdown. `args` must contain ONLY the request fields: `path` and "
+    "- no prose, no markdown. `args` must contain ONLY the request fields: `path` and "
     "`fields` (a flat map of form parameters). NEVER put headers, cookies, session, "
-    "content-type, or auth in `args` — the tool layer handles sessions and headers "
+    "content-type, or auth in `args` - the tool layer handles sessions and headers "
     "automatically. Keep the object short."
 )
 
@@ -53,7 +53,7 @@ def make_agent_brain(agent):
             "secret you can use (token, id, code, csrf, price, api key), your NEXT action must USE "
             "it to advance the objective (e.g. include a stolen token in the follow-up request that "
             "the hints describe). Do NOT call give_up while the objective is unmet and you still have "
-            "an unused lead or an untried strategy — push the exploit to completion and verify. "
+            "an unused lead or an untried strategy - push the exploit to completion and verify. "
             "Use `run_exploit_code` to write a Python loop/computation when one request can't do it. "
             "Use `check_objective` when you think you've won. "
             f"Respond ONLY JSON: {_SCHEMA}"
@@ -63,7 +63,7 @@ def make_agent_brain(agent):
         last_exc = None
         for attempt in range(4):
             try:
-                # Low temperature → stable, compact decisions (less truncation/drift).
+                # Low temperature -> stable, compact decisions (less truncation/drift).
                 decision = await agent.complete_json(trim(user), schema_hint=_SCHEMA, temperature=0.1)
                 if isinstance(decision, dict) and decision.get("tool"):
                     return decision

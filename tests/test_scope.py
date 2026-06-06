@@ -35,6 +35,22 @@ def test_explicit_out_of_scope_blocked():
         s.assert_request_allowed("GET", "https://stripe.com/v1/charges")
 
 
+def test_different_port_same_host_blocked():
+    # Authorized "https://host/api" (-> effective port 443) must NOT admit a
+    # different service on the same host at another port.
+    s = _scope()
+    with pytest.raises(ScopeError):
+        s.assert_request_allowed("GET", "https://api-staging.acmepay.example.com:8443/api/v1/orders")
+
+
+def test_explicit_port_scope_matches_same_port():
+    # When the scope pins a port, the same host:port is in scope and a different one is not.
+    s = _scope(authorized_base_urls=["http://localhost:8000"])
+    s.assert_request_allowed("GET", "http://localhost:8000/orders")
+    with pytest.raises(ScopeError):
+        s.assert_request_allowed("GET", "http://localhost:9001/orders")
+
+
 def test_path_prefix_enforced():
     s = _scope()
     # /api authorized; /admin outside the prefix must be blocked

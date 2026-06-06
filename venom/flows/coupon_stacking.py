@@ -2,11 +2,11 @@
 Coupon / discount abuse flow ("flawed enforcement of business rules").
 
 Many shops block applying the *same* discount code twice but fail to stop you
-from **alternating** between codes — so the discount stacks arbitrarily. This
+from **alternating** between codes - so the discount stacks arbitrarily. This
 flow: add the target to the cart, harvest every discount code it can see
 (including codes revealed by newsletter/sign-up forms), then apply codes in an
 alternating cycle, watching the cart total fall, until it drops within store
-credit — then checks out and verifies the winning state.
+credit - then checks out and verifies the winning state.
 
 General by construction: the coupon endpoint, codes, prices and credit are all
 discovered; nothing about a specific lab is hard-coded.
@@ -161,7 +161,7 @@ async def run(scope: Scope, registry, *, transport=None) -> list[TestCase]:
             vulnerability_class=VulnClass.ECONOMIC_ABUSE,
             hypothesis=("Flawed enforcement of business rules: discount codes can be stacked by "
                         f"alternating them ({codes}), dropping the total from {start_total} to "
-                        f"{total} (minor units) — within store credit."),
+                        f"{total} (minor units) - within store credit."),
             risk_rating=Severity.HIGH,
             affected_endpoint=f"POST {coupon_ep}",
             business_impact="Buy expensive goods far below price via unlimited stacked discounts.",

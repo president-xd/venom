@@ -1,5 +1,5 @@
 """
-Recon enrichment — turn a bare endpoint registry into a senior-tester's situational
+Recon enrichment - turn a bare endpoint registry into a senior-tester's situational
 picture, as the *current* (authenticated) user:
 
   - probe each discovered endpoint and record its baseline status + a text snippet,
@@ -7,11 +7,11 @@ picture, as the *current* (authenticated) user:
 
 For business-logic hunting the denied map is the gold: the objective is almost
 always "perform an action you are currently NOT allowed to perform." Handing the
-agent an explicit list of what it can and cannot do — instead of a flat endpoint
-list — is what lets a model reason about *how to bridge that gap*.
+agent an explicit list of what it can and cannot do - instead of a flat endpoint
+list - is what lets a model reason about *how to bridge that gap*.
 
 State-changing endpoints are probed with an EMPTY/benign body so the server's
-authorization gate fires before any effect — we read the gate, we don't trip it.
+authorization gate fires before any effect - we read the gate, we don't trip it.
 """
 
 from __future__ import annotations
@@ -29,7 +29,7 @@ logger = logging.getLogger("venom.ingest.recon")
 _DENY_STATUS = {401, 403}
 
 # A field whose NAME contains one of these usually holds a credential/secret that
-# is meant to be server-side only — exactly the thing a BOLA/IDOR read leaks.
+# is meant to be server-side only - exactly the thing a BOLA/IDOR read leaks.
 _SECRET_RE = re.compile(
     r"""["']?([A-Za-z0-9_-]*?(?:token|api[_-]?key|apikey|secret|pin|invite|"""
     r"""otp|passcode|password|access[_-]?key|signing[_-]?key|client[_-]?secret)[A-Za-z0-9_-]*)"""
@@ -38,6 +38,31 @@ _SECRET_RE = re.compile(
 )
 # Generic privileged identifiers worth substituting into an object-id parameter.
 _PRIV_IDS = ("administrator", "admin", "root", "superadmin", "1", "0")
+
+# Credentials are frequently shown IN PAGE PROSE on real apps ("Your key
+# 'sk_live_reader'", "API token: ...") - not only leaked by a BOLA read. A senior
+# tester escalates with their OWN visible credential (key + elevated scope) just as
+# often as with a stolen one, so we surface these too. Two patterns:
+#   1. structured api-key style tokens (sk_live_*, ak_*, inv_*, gql_*, rt_*, ...)
+#   2. a value quoted right after a credential word (key 'X', token: "Y", pin 'Z')
+_PAGE_CRED_RE = re.compile(
+    r"\b((?:sk|pk|ak|rt|inv|gql|tok|otp|pat)[_-][A-Za-z0-9][A-Za-z0-9_-]{4,})\b", re.I)
+_QUOTED_CRED_RE = re.compile(
+    r"(?:api[_-]?key|key|token|secret|invite|passcode|pin|code)\s*[:=]?\s*"
+    r"['\"]([A-Za-z0-9][A-Za-z0-9._\-]{3,})['\"]", re.I)
+
+
+def _scan_page_credentials(text: str) -> list[str]:
+    """Plaintext credentials/identifiers visible in page prose (deduped, ordered)."""
+    out: list[str] = []
+    seen: set[str] = set()
+    for m in list(_PAGE_CRED_RE.finditer(text or "")) + list(_QUOTED_CRED_RE.finditer(text or "")):
+        v = m.group(1)
+        if v.lower() in ("none", "null", "true", "false", "administrator", "user") or v in seen:
+            continue
+        seen.add(v)
+        out.append(v)
+    return out
 
 
 def _is_login_redirect(resp) -> bool:
@@ -51,7 +76,7 @@ def _harvest_id_candidates(snippets: list[str], identities) -> list[str]:
     """Build a small, GENERAL set of values to substitute into an object-id
     parameter: privileged names, identities, every integer seen in recon text and
     its near-neighbours, and a 0-9 sweep. This is what a senior tester does by hand
-    to find a BOLA — it is target-agnostic (no lab-specific values)."""
+    to find a BOLA - it is target-agnostic (no lab-specific values)."""
     cands: set[str] = set(_PRIV_IDS)
     cands.update(str(i) for i in range(0, 10))
     for ident in identities or []:
@@ -84,7 +109,7 @@ async def auto_loot(client, registry, *, candidates: list[str], self_texts: dict
                     max_probes: int = 30) -> tuple[list[dict], list[dict]]:
     """Read-only active recon: substitute candidate values into discovered object-id
     query parameters and harvest any secrets (token/api-key/pin/invite/...) the
-    response leaks. This is reconnaissance (GET only, scope-guarded) — the privileged
+    response leaks. This is reconnaissance (GET only, scope-guarded) - the privileged
     ACTION that meets the objective is still left to the exploit. Returns
     (loot, privileged_snippets)."""
     loot: list[dict] = []
@@ -106,7 +131,7 @@ async def auto_loot(client, registry, *, candidates: list[str], self_texts: dict
                 try:
                     resp = await client.request("GET", e.path, params={pname: val},
                                                 follow_redirects=False)
-                except (ScopeError, Exception):  # noqa: BLE001 - best-effort recon
+                except Exception:  # noqa: BLE001 - best-effort recon; one bad probe never aborts loot
                     continue
                 body = resp.text if resp is not None else ""
                 if getattr(resp, "status_code", 0) >= 400:
@@ -169,7 +194,7 @@ async def enrich_recon(scope: Scope, registry, *, transport=None, max_probes: in
                 continue
             status = getattr(resp, "status_code", None)
             # Keep enough text that key identifiers (account names, ids, header names,
-            # hints) survive — 140 chars was cutting names like "TREASURY-OPS" in half.
+            # hints) survive - 140 chars was cutting names like "TREASURY-OPS" in half.
             snippet = compact_html(resp.text if resp is not None else "").get("text", "")[:320]
             entry = {"method": method, "path": e.path, "status": status}
             if snippet:
@@ -195,6 +220,21 @@ async def enrich_recon(scope: Scope, registry, *, transport=None, max_probes: in
                 logger.info("auto-loot: harvested %d secret(s) from object-id enumeration", len(loot))
         except Exception as exc:  # noqa: BLE001 - loot is best-effort
             logger.debug("auto-loot failed: %s", exc)
+
+        # Passive loot: credentials/identifiers printed directly in page prose
+        # (e.g. "Your key 'sk_live_reader'"). These let the agent escalate with its
+        # OWN visible credential rather than hunting a non-existent stolen secret.
+        try:
+            looted_values = {l.get("value") for l in loot}
+            for p in probed:
+                for cred in _scan_page_credentials(p.get("snippet", "")):
+                    if cred in looted_values:
+                        continue
+                    looted_values.add(cred)
+                    loot.append({"found_at": f"{p.get('method')} {p.get('path')} (shown on page)",
+                                 "field": "credential", "value": cred})
+        except Exception as exc:  # noqa: BLE001 - best-effort
+            logger.debug("page-credential scan failed: %s", exc)
 
         return {"probed": probed,
                 "accessible_to_you": sorted(set(accessible)),

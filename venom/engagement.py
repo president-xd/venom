@@ -1,5 +1,5 @@
 """
-Engagement orchestrator — the end-to-end VENOM pipeline:
+Engagement orchestrator - the end-to-end VENOM pipeline:
 
     load scope -> ingest artifacts -> infer business model -> generate tests
     -> execute (scope-guarded) -> report
@@ -26,25 +26,6 @@ from .report import write_report
 from .config import SETTINGS
 
 logger = logging.getLogger("venom.engagement")
-
-
-async def _lab_solved(scope, transport) -> bool:
-    """Trustworthy win-oracle: ask the live target whether it is actually solved.
-    Used to gate expensive purchase flows so a false-positive playbook verdict
-    cannot suppress the precise exploit (and a genuine solve stops further work)."""
-    from .engine.http_client import RateLimiter, ScopedClient
-    try:
-        c = ScopedClient(scope, scope.authorized_base_urls[0], role="win-oracle",
-                         limiter=RateLimiter(scope.rate_limit_per_second), transport=transport)
-    except ValueError:
-        return False
-    try:
-        r = await c.request("GET", "/", follow_redirects=True)
-        return bool(r is not None and "is-solved" in (r.text or ""))
-    except Exception:  # noqa: BLE001
-        return False
-    finally:
-        await c.aclose()
 
 
 def _dedup_confirmed(cases: list) -> list:
@@ -88,7 +69,7 @@ async def run_engagement(
     objective_text: str = "",           # the agent's goal (e.g. "buy the jacket")
     transport=None,  # httpx transport override (tests / in-memory targets)
 ) -> EngagementResult:
-    # 1. Authorization — first, always.
+    # 1. Authorization - first, always.
     scope = Scope.from_file(scope_path)
     scope.validate_window()
     logger.info("Loaded scope:\n%s", scope.summary())
@@ -98,7 +79,7 @@ async def run_engagement(
     if use_llm:
         router = LLMRouter.from_env(air_gap=scope.air_gap_mode, mode=scope.llm_mode)
         if not router.any_enabled():
-            logger.warning("No LLM provider configured — running in OFFLINE mode.")
+            logger.warning("No LLM provider configured - running in OFFLINE mode.")
             router = None
 
     # 3. Ingest artifacts -> registry.
@@ -121,7 +102,7 @@ async def run_engagement(
                 am = AuthManager(scope, dry_run=False, transport=transport)
                 auth_state = await am.ensure(scope.identities[0]["name"])
             except Exception as exc:  # noqa: BLE001
-                logger.warning("Discovery auth failed (%s) — crawling unauthenticated.", exc)
+                logger.warning("Discovery auth failed (%s) - crawling unauthenticated.", exc)
         info = await crawl(scope, ing.registry,
                            seeds=crawl_seeds or disc.get("seeds"),
                            auth_state=auth_state, transport=transport,
@@ -175,7 +156,7 @@ async def run_engagement(
                               budget=Budget(max_tokens=SETTINGS.agent_token_budget),
                               tracer=agent_trace)
         # Model tiering: per-step decisions go to the FAST model (CODEGEN/Qwen),
-        # not the slow base model — cheaper and faster for many short reasoning steps.
+        # not the slow base model - cheaper and faster for many short reasoning steps.
         objective = Objective.from_scope(scope, fallback=objective_text or scope.target_name)
         brain = make_agent_brain(orch.agent(AgentRole.CODEGEN))
         agent = Agent(scope, brain, transport=transport, skills=SkillLibrary())
@@ -184,10 +165,10 @@ async def run_engagement(
             if reasoned:
                 cases += reasoned
                 logger.info("Agent confirmed %d finding(s) toward objective", len(reasoned))
-        except Exception as exc:  # noqa: BLE001 — reasoning is best-effort
+        except Exception as exc:  # noqa: BLE001 - reasoning is best-effort
             logger.warning("Agent error: %s", exc)
 
-        # COVERAGE CAMPAIGN — do NOT stop at one. Decompose the surface into many
+        # COVERAGE CAMPAIGN - do NOT stop at one. Decompose the surface into many
         # scoped differential targets (every action the tester is currently FORBIDDEN
         # to perform) and hunt EACH one, collecting every flaw that can be PROVEN.
         # This is what turns "found 1 of N" into systematic coverage; each win is
@@ -195,7 +176,7 @@ async def run_engagement(
         try:
             from .cognition import run_campaign, derive_objectives, make_oneshot_synthesizer
             from .ingest.recon import enrich_recon
-            # Probe WIDE for the campaign — the more of the surface we map, the more
+            # Probe WIDE for the campaign - the more of the surface we map, the more
             # forbidden actions we surface to decompose into targets (default 24 is
             # tuned for a single brief; coverage wants the whole reachable surface).
             enrichment = await enrich_recon(scope, ing.registry, transport=transport,
@@ -216,14 +197,14 @@ async def run_engagement(
                 ing.notes.append(camp.summary())
                 logger.info("Coverage campaign confirmed %d finding(s) across %d target(s)",
                             camp.confirmed, camp.attempted)
-        except Exception as exc:  # noqa: BLE001 — coverage is best-effort, never aborts the run
+        except Exception as exc:  # noqa: BLE001 - coverage is best-effort, never aborts the run
             logger.warning("Coverage campaign error: %s", exc)
 
         if router.budget is not None:
             ing.notes.append(f"Agent LLM usage: {router.tracer.summary()} | {router.budget.summary()}")
 
     # Actionable guidance: a registration endpoint exists but the operator gave no
-    # email client URL — every email-confirmation exploit (account-takeover,
+    # email client URL - every email-confirmation exploit (account-takeover,
     # email-parser discrepancy, truncation) NEEDS to read the confirmation link, so
     # they cannot complete. Say so loudly instead of silently skipping them.
     _has_register = any(e.path.rstrip("/").endswith("/register") for e in ing.registry)
@@ -260,7 +241,7 @@ async def run_engagement(
         except Exception as exc:  # noqa: BLE001
             logger.warning("Email-parser flow error: %s", exc)
 
-    # 6c-bis. Exceptional-input registration flow (email length-truncation →
+    # 6c-bis. Exceptional-input registration flow (email length-truncation ->
     # privileged domain). Same preconditions as account-lifecycle (inbox + a
     # register endpoint); a distinct vulnerability class so it runs independently.
     if not dry_run and scope.email_client_url:
@@ -286,7 +267,7 @@ async def run_engagement(
         except Exception as exc:  # noqa: BLE001
             logger.warning("Account-privilege flow error: %s", exc)
 
-    # 6c-quater. Flawed-login-state-machine flow (skip a post-login step → admin).
+    # 6c-quater. Flawed-login-state-machine flow (skip a post-login step -> admin).
     if not dry_run and scope.identities:
         from .flows import login_statemachine
         try:
@@ -319,34 +300,43 @@ async def run_engagement(
         except Exception as exc:  # noqa: BLE001
             logger.warning("Coupon-stacking flow error: %s", exc)
 
+    # The three purchasing flows below all target the SAME economic goal ("acquire
+    # the item without paying full price"). They are ordered cheapest-first, and once
+    # one CONFIRMS the win we skip the rest - especially the request-heavy
+    # integer-overflow flow. This gate is a local boolean (app-agnostic), NOT a
+    # PortSwigger 'is-solved' banner, so the general pipeline behaves identically on
+    # a real enterprise target.
+    purchased = False
+
     # 6d-bis. Workflow-sequence-skip purchasing flow (cheap: add item + jump to
-    # order-confirmation). Gated on the live win-oracle (not on any prior verdict),
-    # so a false-positive playbook can't suppress the precise purchase exploit.
-    if not dry_run and not await _lab_solved(scope, transport):
+    # order-confirmation).
+    if not dry_run:
         from .flows import workflow_skip
         try:
             wfs = await workflow_skip(scope, ing.registry, transport=transport)
             if wfs:
                 cases += wfs
+                purchased = True
                 logger.info("Workflow-skip flow confirmed %d finding(s)", len(wfs))
         except Exception as exc:  # noqa: BLE001
             logger.warning("Workflow-skip flow error: %s", exc)
 
     # 6d-ter. Infinite-money flow (gift-card arbitrage; request-heavy). Try before
     # the overflow if nothing cheaper solved the purchase yet.
-    if not dry_run and not await _lab_solved(scope, transport):
+    if not dry_run and not purchased:
         from .flows import infinite_money
         try:
             mny = await infinite_money(scope, ing.registry, transport=transport)
             if mny:
                 cases += mny
+                purchased = True
                 logger.info("Infinite-money flow confirmed %d finding(s)", len(mny))
         except Exception as exc:  # noqa: BLE001
             logger.warning("Infinite-money flow error: %s", exc)
 
-    # 6e. Integer-overflow purchasing flow (expensive ~hundreds of requests) —
+    # 6e. Integer-overflow purchasing flow (expensive ~hundreds of requests) -
     # only as a last resort when nothing cheaper already solved the purchase.
-    if not dry_run and not await _lab_solved(scope, transport):
+    if not dry_run and not purchased:
         from .flows import integer_overflow
         try:
             ovf = await integer_overflow(scope, ing.registry, transport=transport)
@@ -356,7 +346,7 @@ async def run_engagement(
         except Exception as exc:  # noqa: BLE001
             logger.warning("Integer-overflow flow error: %s", exc)
 
-    # Dedup CONFIRMED findings — the agent, the coverage campaign, the playbooks and
+    # Dedup CONFIRMED findings - the agent, the coverage campaign, the playbooks and
     # the flows can each prove the same flaw; report it once. Keyed by the actual
     # win (class + endpoint); the first confirmation (richest evidence) is kept.
     cases = _dedup_confirmed(cases)

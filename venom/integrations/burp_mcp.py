@@ -1,10 +1,10 @@
 """
-Burp Suite MCP integration — KEYLESS.
+Burp Suite MCP integration - KEYLESS.
 
 The PortSwigger "MCP Server" Burp extension exposes a local Model Context
 Protocol endpoint (default SSE: http://127.0.0.1:9876/sse). It runs on the
 analyst's own machine alongside Burp, so there is no API key and no cloud
-service — VENOM just speaks MCP to it over loopback.
+service - VENOM just speaks MCP to it over loopback.
 
 Provisioning Burp + the extension is handled by scripts/setup_burp.* and
 scripts/run_burp_mcp.* so the endpoint is available before you run an engagement.
@@ -95,13 +95,13 @@ class BurpMcpClient:
 
     async def list_tools(self) -> list[dict[str, Any]]:
         if self._session is None:
-            raise BurpMcpError("Not connected — use `async with BurpMcpClient(...)`.")
+            raise BurpMcpError("Not connected - use `async with BurpMcpClient(...)`.")
         resp = await self._session.list_tools()
         return [{"name": t.name, "description": t.description} for t in resp.tools]
 
     async def call_tool(self, name: str, arguments: dict[str, Any] | None = None) -> Any:
         if self._session is None:
-            raise BurpMcpError("Not connected — use `async with BurpMcpClient(...)`.")
+            raise BurpMcpError("Not connected - use `async with BurpMcpClient(...)`.")
         return await self._session.call_tool(name, arguments or {})
 
 

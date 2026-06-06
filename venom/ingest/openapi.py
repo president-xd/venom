@@ -1,5 +1,5 @@
 """
-OpenAPI / Swagger ingestion (Stage 1 — highest fidelity).
+OpenAPI / Swagger ingestion (Stage 1 - highest fidelity).
 
 Parses paths, methods, parameters, request bodies, security requirements, and
 vendor `x-` extensions. Flags `deprecated`, `x-internal`, and `x-admin` markers
@@ -25,7 +25,7 @@ def _load(path: Path) -> dict:
     text = path.read_text(encoding="utf-8")
     if path.suffix.lower() in {".yaml", ".yml"}:
         if yaml is None:
-            raise RuntimeError("PyYAML not installed — needed for YAML specs. pip install pyyaml")
+            raise RuntimeError("PyYAML not installed - needed for YAML specs. pip install pyyaml")
         return yaml.safe_load(text)
     return json.loads(text)
 

@@ -44,8 +44,46 @@ def test_registry_metadata_is_complete():
     for lab in LABS:
         assert lab.difficulty in ("easy", "medium", "hard")
         assert lab.objective and lab.win_url and lab.index_link and lab.vuln_id
-        if lab.win_action:                       # differential labs declare a success marker
-            assert lab.success_text
+        # ENTERPRISE INVARIANT: every lab is verified by a differential win_action +
+        # a realistic success marker — never the 'is-solved' banner. So both MUST be
+        # present on every lab (this is what makes the engine's wins transfer to a
+        # real app that has no lab banner).
+        assert lab.win_action and lab.win_action.get("method") and lab.win_action.get("path"), lab.name
+        assert lab.success_text, lab.name
+
+
+_SUCCESS_STATUS = (200, 201, 202, 204, 302, 303)
+
+
+def _win_action_succeeds(c, lab) -> bool:
+    """Mirror Objective._run_win_action: run the lab's win_action and decide whether
+    it 'succeeded' (success status AND the realistic success marker is present)."""
+    a = lab.win_action
+    method = (a.get("method") or "GET").upper()
+    path = a.get("path") or lab.win_url
+    if method == "GET":
+        r = c.get(path)
+    else:
+        r = c.post(path, data=a.get("data") or {})
+    ok = r.status_code in _SUCCESS_STATUS
+    if ok and lab.success_text:
+        ok = lab.success_text.lower() in (r.text or "").lower()
+    return ok
+
+
+def test_every_lab_win_action_denied_at_baseline():
+    """The is-solved-free oracle's core guarantee: the HONEST/default win_action
+    (delete without a stolen credential, buy at list price, deploy to staging,
+    transfer 1 from your own account) must be DENIED for an un-escalated, logged-in
+    user. If any lab's win_action succeeded at baseline it would be a false 'free'
+    finding on a real app. This proves the differential baseline is sound for all 37
+    WITHOUT relying on any lab banner."""
+    for lab in LABS:
+        c, _ = client()
+        login(c)                                  # authenticated, un-escalated user
+        assert not _win_action_succeeds(c, lab), (
+            f"{lab.name}: win_action succeeded at baseline (no exploit) -> would be a "
+            f"false free win on a real app")
 
 
 # --------------------------------------------------------------------- easy

@@ -200,7 +200,11 @@ venom_data/
 PLAN.md
 engagements/
 commit.sh
-tools/
+# Burp + MCP download dir (VENOM_TOOLS_DIR, default ./tools). Anchored to the repo
+# ROOT with a leading slash so it does NOT also swallow the `venom/tools/` package
+# (the exploit sandbox) — an unanchored `tools/` matches at every level and was
+# silently excluding the security-critical sandbox from the repo.
+/tools/
 
 # Built Visual Studio Code Extensions
 *.vsix
@@ -237,3 +241,14 @@ $RECYCLE.BIN/
 *.lnk
 
 # End of https://www.toptal.com/developers/gitignore/api/python,visualstudiocode,windows
+# ----------------------------------------------------------------------
+# VulnLab — the deliberately-vulnerable proving ground. Kept on disk for
+# local development/tests, but NOT pushed (shipping a vulnerable app in a
+# product repo is unprofessional). The suite skips vulnlab-dependent tests
+# when this is absent (pytest.importorskip), so a clone stays green.
+# ----------------------------------------------------------------------
+vulnlab/
+scripts/eval_vulnlab.py
+scripts/debug_lab.py
+tests/test_vulnlab_labs.py
+tests/test_oracle_is_solved_free.py

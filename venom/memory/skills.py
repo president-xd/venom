@@ -1,9 +1,9 @@
 """
-Skill library — long-term memory of confirmed exploit chains.
+Skill library - long-term memory of confirmed exploit chains.
 
 On a confirmed solve, the agent persists the winning tool-call sequence as a
 parameterized, retrievable Skill. Future engagements retrieve relevant skills (by
-goal + observed surface keywords) and feed them to the planner as priors — so
+goal + observed surface keywords) and feed them to the planner as priors - so
 VENOM gets faster and more autonomous over time. This is the bridge from
 hand-coded flows to self-authored ones.
 

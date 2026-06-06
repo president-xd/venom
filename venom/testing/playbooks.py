@@ -1,5 +1,5 @@
 """
-Attack-class playbooks — now generate CONCRETE, runnable exploits.
+Attack-class playbooks - now generate CONCRETE, runnable exploits.
 
 Where the registry exposes the right relationships and the scope provides test
 identities, a playbook emits a full chain: provision prerequisites (setup_steps,
@@ -27,7 +27,7 @@ def _tid() -> str:
 
 
 def _is_web_form(ep: Endpoint) -> bool:
-    """A crawled HTML form — handled by web_playbooks, not the JSON-API playbooks."""
+    """A crawled HTML form - handled by web_playbooks, not the JSON-API playbooks."""
     return "crawl" in ep.source or any(p.location == "form" for p in ep.parameters)
 
 
@@ -87,7 +87,7 @@ def bola_idor(registry: EndpointRegistry, identities) -> list[TestCase]:
             cases.append(TestCase(
                 test_id=_tid(),
                 vulnerability_class=VulnClass.BOLA_IDOR,
-                hypothesis=(f"{getter.key} authorizes by id without ownership check — "
+                hypothesis=(f"{getter.key} authorizes by id without ownership check - "
                             f"'{attacker}' can read an object owned by '{victim}'."),
                 risk_rating=sev,
                 affected_endpoint=getter.key,
@@ -145,7 +145,7 @@ def sequence_bypass(registry: EndpointRegistry, graph: BusinessModelGraph, ident
         setup_steps=setup,
         # Confirmation is PROOF, not a bare 200: the illegal transition must be
         # ACCEPTED (success body, no error) on a resource we provisioned and never
-        # advanced through its precondition state — a genuine sequence differential.
+        # advanced through its precondition state - a genuine sequence differential.
         steps=[TestStep(step=2, description="Invoke terminal transition out of sequence",
                         method=terminal.method, path=attack_path, identity=attacker,
                         body={"reason": "venom-test"},
@@ -173,7 +173,7 @@ def race_conditions(registry: EndpointRegistry, identities) -> list[TestCase]:
         cases.append(TestCase(
             test_id=_tid(),
             vulnerability_class=VulnClass.RACE_CONDITION,
-            hypothesis=(f"{action.key} is non-atomic — {threads} concurrent calls apply "
+            hypothesis=(f"{action.key} is non-atomic - {threads} concurrent calls apply "
                         "more than once (TOCTOU double-spend)."),
             risk_rating=Severity.CRITICAL,
             affected_endpoint=action.key,
@@ -215,7 +215,7 @@ def mass_assignment(registry: EndpointRegistry, identities) -> list[TestCase]:
         cases.append(TestCase(
             test_id=_tid(),
             vulnerability_class=VulnClass.MASS_ASSIGNMENT,
-            hypothesis=(f"{ep.key}: privileged fields ({', '.join(list(_PRIV_FIELDS)[:4])}…) "
+            hypothesis=(f"{ep.key}: privileged fields ({', '.join(list(_PRIV_FIELDS)[:4])}...) "
                         "are not stripped server-side (mass assignment)."),
             risk_rating=Severity.HIGH,
             affected_endpoint=ep.key,
@@ -318,7 +318,7 @@ def faith_based_rules(graph: BusinessModelGraph, identities) -> list[TestCase]:
         method = rule.attached_to.split(" ")[0] if " " in rule.attached_to else "POST"
         # A business-CONSTRAINT is violated by performing a forbidden ACTION (a
         # state-changing request), not by READING a page. A GET that returns 200 is
-        # just a landing page rendering — never proof of a logic flaw — so skip it
+        # just a landing page rendering - never proof of a logic flaw - so skip it
         # rather than emit a guaranteed false positive. (Mutating faith-based rules
         # are still emitted; the runner's verdict gate records them as leads unless a
         # real state change / content proof corroborates them.)
@@ -328,7 +328,7 @@ def faith_based_rules(graph: BusinessModelGraph, identities) -> list[TestCase]:
             test_id=_tid(),
             vulnerability_class=VulnClass.FAITH_BASED_RULE,
             hypothesis=(f"Documented rule '{rule.description}' ({rule.rule_type}) has no "
-                        "visible server-side enforcement — attempt the forbidden action."),
+                        "visible server-side enforcement - attempt the forbidden action."),
             risk_rating=Severity.HIGH,
             affected_endpoint=rule.attached_to or "(unmapped)",
             business_impact=f"Violation of intended constraint: {rule.description}",

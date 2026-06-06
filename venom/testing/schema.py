@@ -113,13 +113,15 @@ class Finding:
     vulnerability_class: VulnClass
     affected_endpoint: str
     business_impact: str
+    # Full technical explanation (never truncated) shown on the finding detail page.
+    description: str = ""
     reproduction_steps: list[dict] = field(default_factory=list)
     evidence: dict[str, Any] = field(default_factory=dict)
     cvss_vector: str = ""
     remediation: dict[str, str] = field(default_factory=dict)
     references: list[str] = field(default_factory=list)
     source_test_id: str = ""
-    # How this finding was actually confirmed — surfaced verbatim in the report/UI
+    # How this finding was actually confirmed - surfaced verbatim in the report/UI
     # so we never imply a differential oracle where there was none.
     origin: str = ""            # "agent" | "oneshot" | "flow" | "playbook"
     confirmation: str = ""      # "differential oracle" | "state-delta" | "response-content" | ...

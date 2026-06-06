@@ -1,5 +1,5 @@
 """
-Test runner — executes TestCase objects against an authorized target.
+Test runner - executes TestCase objects against an authorized target.
 
 Capabilities that make findings real (not just request shapes):
 
@@ -11,7 +11,7 @@ Capabilities that make findings real (not just request shapes):
     AFTER the attack; numeric deltas (balances/counters) are exposed to success
     conditions as `<var>_before/_after/_delta` and `net_balance_delta`.
   - True concurrency for race tests: burst steps fire with the rate limiter
-    bypassed, then are confirmed by final state — not by 2xx count.
+    bypassed, then are confirmed by final state - not by 2xx count.
   - Evidence capture: request summaries, statuses, response excerpts, and the
     before/after state are attached to the case.
 
@@ -211,7 +211,7 @@ class TestRunner:
         return next(iter(deltas.values()), 0.0)
 
     # Tokens whose presence in a success_condition means the verdict depends on
-    # real PROOF — response content (body/text) or a measured state delta — not
+    # real PROOF - response content (body/text) or a measured state delta - not
     # merely on the server having RESPONDED. A bare `status in (200, 201)` proves
     # only that a page/endpoint answered, which is never a business-logic win:
     # that is exactly how a forgiving app (200 on every landing page) produced the
@@ -236,8 +236,8 @@ class TestRunner:
           - a response-content assertion in the condition (body/text/delta), OR
           - a cross-identity differential (provisioned as victim, abused as attacker).
 
-        A condition met by HTTP status alone — with no state change and no content
-        proof — is recorded as NEEDS_REVIEW (a lead for the agent/operator to
+        A condition met by HTTP status alone - with no state change and no content
+        proof - is recorded as NEEDS_REVIEW (a lead for the agent/operator to
         verify), NOT a confirmed finding. This is the enterprise rule the differential
         oracle encodes: a 200 is not a vulnerability. It is what stops a landing-page
         GET that returns 200 from being reported as an exploit."""
@@ -271,13 +271,13 @@ class TestRunner:
                 case.notes.append(
                     f"Step {step.step}: '{step.success_condition}' MET with corroboration "
                     f"(status={ctx.get('status')}, net_delta={net_balance_delta}, "
-                    f"state_changed={state_changed}, cross_identity={cross_identity}) — CONFIRMED"
+                    f"state_changed={state_changed}, cross_identity={cross_identity}) - CONFIRMED"
                 )
             else:
                 weak = True
                 case.notes.append(
                     f"Step {step.step}: '{step.success_condition}' MET but status-only "
-                    f"(status={ctx.get('status')}, no state delta, no response-content proof) — "
+                    f"(status={ctx.get('status')}, no state delta, no response-content proof) - "
                     f"recorded as a LEAD requiring verification, NOT a confirmed exploit"
                 )
         if substantive:

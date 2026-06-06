@@ -2,9 +2,9 @@
 Account-lifecycle flow: registration + email verification + privilege via email
 domain (the "inconsistent security controls" pattern).
 
-Chain: register a user (email at the inbox domain) → read the confirmation link
-from the email client → confirm → log in → change the email to the company/staff
-domain (often not re-validated) → reach the admin panel. If the scope opts into a
+Chain: register a user (email at the inbox domain) -> read the confirmation link
+from the email client -> confirm -> log in -> change the email to the company/staff
+domain (often not re-validated) -> reach the admin panel. If the scope opts into a
 destructive objective (`allow_destructive` + `objective_delete_user`), it then
 performs the objective (e.g. delete a user) and checks the solved/winning state.
 

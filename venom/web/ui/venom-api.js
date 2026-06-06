@@ -5,7 +5,7 @@
    ============================================================ */
 (function () {
   async function get(url) {
-    const r = await fetch(url, { headers: { Accept: "application/json" } });
+    const r = await fetch(url, { headers: { Accept: "application/json" }, credentials: "same-origin" });
     if (!r.ok) throw new Error(url + " -> " + r.status);
     return r.json();
   }
@@ -13,9 +13,10 @@
     const r = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
+      credentials: "same-origin",                 // carry the session cookie
       body: JSON.stringify(body || {}),
     });
-    return r.json();
+    return r.json().catch(() => ({}));
   }
 
   // Stream a live engagement's trace. onEvent({t, x, order, ...}); the server
@@ -47,6 +48,9 @@
 
   window.API = {
     get, post, streamRun, boot,
+    me: () => get("/api/me"),
+    login: (username, password) => post("/api/login", { username, password }),
+    logout: () => post("/api/logout", {}),
     startRun: (opts) => post("/api/runs", opts),
     runStatus: (id) => get("/api/runs/" + id),
     runFindings: (id) => get("/api/runs/" + id + "/findings"),

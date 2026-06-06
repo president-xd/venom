@@ -8,7 +8,7 @@ total back inside [0, store-credit] while the expensive target is in the cart,
 then check out for an unintended price.
 
 Because the prices and the modulus are known (discovered from the catalog), the
-exact add sequence is computed locally — largest items wrap the total fast, then
+exact add sequence is computed locally - largest items wrap the total fast, then
 progressively cheaper items land it within the credit window. The plan is then
 executed, the live total is re-read to confirm the model, and only then does it
 check out. Robust to whatever is already in the cart (it reads the current total).
@@ -142,7 +142,7 @@ async def run(scope: Scope, registry, *, transport=None) -> list[TestCase]:
         # Verify the model matches the server before committing.
         tf, ck = await total()
         if tf is None or not (0 <= _signed(tf) <= credit):
-            logger.info("overflow: final total %s not within credit — aborting checkout", tf)
+            logger.info("overflow: final total %s not within credit - aborting checkout", tf)
             return []
         await lab.request("POST", checkout, data={"csrf": ck}, follow_redirects=True)
         steps_run.append(TestStep(step=3, description=f"checkout at total {_signed(tf)} cents",

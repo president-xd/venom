@@ -1,5 +1,5 @@
 """
-JavaScript bundle ingestion (Stage 2) — extract "shadow endpoints": URL paths
+JavaScript bundle ingestion (Stage 2) - extract "shadow endpoints": URL paths
 referenced by the frontend that may not appear in any official spec, plus
 fetch/axios/XHR call sites and likely-hardcoded secrets.
 """
@@ -42,7 +42,7 @@ def parse_js_bundle(path: str | Path, registry: EndpointRegistry) -> dict:
         registry.add(ep)
         added += 1
 
-    secrets = sorted({s[:6] + "…(redacted)" for s in _SECRET.findall(text)})
+    secrets = sorted({s[:6] + "...(redacted)" for s in _SECRET.findall(text)})
     return {
         "paths_found": len(found_paths),
         "endpoints_added": added,

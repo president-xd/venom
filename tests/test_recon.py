@@ -11,6 +11,9 @@ from venom.core.registry import EndpointRegistry, Endpoint
 from venom.ingest.recon import enrich_recon
 from venom.cognition.oneshot import build_brief
 from venom.cognition import Objective
+
+import pytest
+pytest.importorskip("vulnlab")   # dev-only proving ground (gitignored); skip if absent
 from vulnlab.app import make_transport, new_state
 
 BASE = "https://vuln.local"

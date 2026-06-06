@@ -1,18 +1,18 @@
 """
-Coverage campaign — hunt the WHOLE surface, not a single objective.
+Coverage campaign - hunt the WHOLE surface, not a single objective.
 
 A real target has MANY flaws. A single-objective run finds at most one and stops.
 The campaign turns the hunt into systematic coverage:
 
-  1. DECOMPOSE the reconned surface into many scoped, differential objectives —
+  1. DECOMPOSE the reconned surface into many scoped, differential objectives -
      every action currently FORBIDDEN to the tester ('denied_to_you') is a
      candidate flaw: "denied now, a vulnerability if it can be made to succeed".
   2. Hunt EACH target with a focused, fresh best-of-N one-shot.
-  3. CONTINUE after every confirmation — never stop at the first win — until the
+  3. CONTINUE after every confirmation - never stop at the first win - until the
      surface is covered or the global budget is spent.
 
 Every confirmation is independently proven by the differential oracle (forbidden
-at baseline → succeeds after the exploit), so more findings never means more false
+at baseline -> succeeds after the exploit), so more findings never means more false
 positives. The accessible/denied recon is computed ONCE and reused across targets.
 """
 
@@ -27,7 +27,7 @@ from .oneshot import oneshot_hunt
 
 logger = logging.getLogger("venom.cognition.campaign")
 
-# Targets touching these get hunted first — economic / destructive / privileged
+# Targets touching these get hunted first - economic / destructive / privileged
 # actions are where business-logic impact concentrates.
 _HIGH_VALUE = ("admin", "delete", "refund", "transfer", "payout", "wire", "approve",
                "promote", "role", "grant", "escalate", "reset", "deploy")
@@ -63,7 +63,7 @@ def _rank(label: str) -> int:
 
 def derive_objectives(registry, enrichment: dict | None, *, base_objective: str = "",
                       max_targets: int = 12) -> list[Objective]:
-    """Decompose the surface into many differential objectives — one per forbidden
+    """Decompose the surface into many differential objectives - one per forbidden
     action discovered, highest business-impact first."""
     objs: list[Objective] = []
     seen: set[tuple[str, str]] = set()
@@ -81,7 +81,7 @@ def derive_objectives(registry, enrichment: dict | None, *, base_objective: str 
         desc = f"Escalate from the current low-privileged user to perform the " \
                f"currently-FORBIDDEN action {method} {path}"
         if base_objective:
-            desc += f" — engagement goal: {base_objective}"
+            desc += f" - engagement goal: {base_objective}"
         objs.append(Objective(description=desc,
                               win_action={"method": method, "path": path, "data": data}))
         if len(objs) >= max_targets:
@@ -110,11 +110,11 @@ async def run_campaign(scope, registry, synth_factory, *, objectives: list[Objec
     for obj in objectives[:max_targets]:
         res.attempted += 1
         try:
-            synth = synth_factory()   # fresh per target → resets best-of-N temperature
+            synth = synth_factory()   # fresh per target -> resets best-of-N temperature
             found = await oneshot_hunt(scope, registry, synth, objective=obj,
                                        transport=transport, max_llm_calls=per_target_calls,
                                        enrichment=enrichment)
-        except Exception as exc:  # noqa: BLE001 — one target must not abort coverage
+        except Exception as exc:  # noqa: BLE001 - one target must not abort coverage
             logger.warning("campaign target %s errored: %s", obj.win_action, exc)
             found = []
         confirmed = bool(found)

@@ -20,6 +20,6 @@ engagements/
 
 # Dev-only files not needed at runtime.
 tests/
-.claude/
+.claude/ # removal
 *.md
 !README.md

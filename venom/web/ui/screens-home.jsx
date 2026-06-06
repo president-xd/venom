@@ -1,5 +1,5 @@
 /* ============================================================
-   VENOM — Dashboard + New Engagement wizard (scope → describe)
+   VENOM - Dashboard + New Engagement wizard (scope -> describe)
    ============================================================ */
 
 function Dashboard({ go, openEngagement }) {
@@ -120,12 +120,12 @@ function NewEngagement({ onLaunch }) {
   const [launching, setLaunching] = React.useState(false);
 
   // Real, editable scope: in-scope path prefixes (additive) + hard-blocked hosts.
-  // Entered through inline fields — no browser prompt; the operator types the value.
+  // Entered through inline fields - no browser prompt; the operator types the value.
   const [scopePaths, setScopePaths] = React.useState(["/shop/*", "/api/*"]);
   const [oos, setOos] = React.useState(["stripe.com", "auth0.com"]);
   const [newPrefix, setNewPrefix] = React.useState("");
   const [newHost, setNewHost] = React.useState("");
-  // Email-client / inbox URL — needed by registration-flow labs (email parser
+  // Email-client / inbox URL - needed by registration-flow labs (email parser
   // discrepancy, truncation, account-takeover) to read the confirmation link.
   const [emailUrl, setEmailUrl] = React.useState("");
 
@@ -161,7 +161,7 @@ function NewEngagement({ onLaunch }) {
     setNewHost("");
   };
 
-  // written authorization — filled by the operator (not hardcoded)
+  // written authorization - filled by the operator (not hardcoded)
   const today = new Date().toISOString().slice(0, 10);
   const inAWeek = new Date(Date.now() + 7 * 864e5).toISOString().slice(0, 10);
   const [engName, setEngName] = React.useState("VulnLab engagement");
@@ -198,7 +198,7 @@ function NewEngagement({ onLaunch }) {
   const doLaunch = async () => {
     setLaunching(true);
     await onLaunch({
-      // Target the URL the operator actually entered — NOT a hardcoded demo host.
+      // Target the URL the operator actually entered - NOT a hardcoded demo host.
       target_url: url, objective: prompt, rate, destructive, classes: picked,
       // The live engagement is an LLM-driven hunt; these toggles reach the backend.
       use_llm: true, think, crawl,
@@ -220,8 +220,8 @@ function NewEngagement({ onLaunch }) {
             <p className="sub" style={{ marginBottom: 18 }}>VENOM refuses every request outside this scope. There is no bypass flag.</p>
             <div className="field">
               <label>Target base URL</label>
-              <input className="input mono" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://…" />
-              <p className="hint">The engagement targets <b>exactly this URL</b>. <code>localhost:8000</code> runs the <b>bundled VulnLab</b> in-process (safe, always authorized). Any other URL is hunted <b>live over HTTP</b> — you must be authorized to test it, and supply identities for authenticated flows. Every request is gated by scheme + host + port + path prefix.</p>
+              <input className="input mono" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://..." />
+              <p className="hint">The engagement targets <b>exactly this URL</b>. <code>localhost:8000</code> runs the <b>bundled VulnLab</b> in-process (safe, always authorized). Any other URL is hunted <b>live over HTTP</b> - you must be authorized to test it, and supply identities for authenticated flows. Every request is gated by scheme + host + port + path prefix.</p>
             </div>
             <label style={{ display: "block", marginTop: 6 }}>In-scope path prefixes <span className="hint" style={{ display: "inline", margin: 0 }}>(click a chip to remove)</span></label>
             <div className="row gap10 wrap" style={{ marginTop: 4 }}>
@@ -262,9 +262,9 @@ function NewEngagement({ onLaunch }) {
             </div>
             <hr className="div" />
             <div className="field mb0">
-              <label>Email client / inbox URL <span className="hint" style={{ display: "inline", margin: 0 }}>(optional — for registration / email-parser labs)</span></label>
+              <label>Email client / inbox URL <span className="hint" style={{ display: "inline", margin: 0 }}>(optional - for registration / email-parser labs)</span></label>
               <input className="input mono" value={emailUrl} onChange={(e) => setEmailUrl(e.target.value)}
-                placeholder="https://exploit-….exploit-server.net/email" aria-label="Email client URL" />
+                placeholder="https://exploit-....exploit-server.net/email" aria-label="Email client URL" />
               <p className="hint">If the lab confirms registration by email, paste the inbox/exploit-server email URL. VENOM reads the confirmation link to complete account-takeover & email-parser-discrepancy flows. Its host is auto-added to scope.</p>
             </div>
           </div>
@@ -332,7 +332,7 @@ function NewEngagement({ onLaunch }) {
                 </div>
               ))}
               <button className="btn btn-sm btn-ghost" style={{ alignSelf: "flex-start" }} onClick={addIdentity}><Ic name="plus" size={13} /> Add identity</button>
-              <p className="hint" style={{ margin: 0 }}>No credentials? Leave blank to hunt unauthenticated (limited — most access-control flaws need a session). Defaults to <code>wiener:peter</code> (PortSwigger / bundled VulnLab).</p>
+              <p className="hint" style={{ margin: 0 }}>No credentials? Leave blank to hunt unauthenticated (limited - most access-control flaws need a session). Defaults to <code>wiener:peter</code> (PortSwigger / bundled VulnLab).</p>
             </div>
           </div>
 
@@ -348,7 +348,7 @@ function NewEngagement({ onLaunch }) {
               <button className={`switch ${crawl ? "on" : ""}`} onClick={() => setCrawl(!crawl)}><span className="knob" /></button>
             </div>
             <div className="toggle-row">
-              <div><div style={{ fontWeight: 600, fontSize: 13 }}>Adaptive reasoning <span className="tag mono">--think</span></div><div className="hint" style={{ margin: 0 }}>Observe → probe → re-think → exploit → verify.</div></div>
+              <div><div style={{ fontWeight: 600, fontSize: 13 }}>Adaptive reasoning <span className="tag mono">--think</span></div><div className="hint" style={{ margin: 0 }}>Observe -> probe -> re-think -> exploit -> verify.</div></div>
               <button className={`switch ${think ? "on" : ""}`} onClick={() => setThink(!think)}><span className="knob" /></button>
             </div>
             <div className="toggle-row">
@@ -420,7 +420,7 @@ function NewEngagement({ onLaunch }) {
           <div className="between">
             <button className="btn" onClick={() => setStep(1)}><Ic name="arrowL" size={15} /> Back</button>
             <button className="btn btn-primary btn-lg" onClick={doLaunch} disabled={launching}>
-              {launching ? <><Ic name="spinner" size={15} className="spin" /> Launching…</> : <><Ic name="zap" size={15} /> Launch engagement</>}
+              {launching ? <><Ic name="spinner" size={15} className="spin" /> Launching...</> : <><Ic name="zap" size={15} /> Launch engagement</>}
             </button>
           </div>
         </div>

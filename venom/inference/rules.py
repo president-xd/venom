@@ -77,10 +77,10 @@ async def infer_business_model(
     registry: EndpointRegistry,
     router: LLMRouter | None = None,
     domain_docs: str = "",
-    agent=None,  # venom.agents.base.Agent — orchestrator/base model when provided
+    agent=None,  # venom.agents.base.Agent - orchestrator/base model when provided
 ) -> BusinessModelGraph:
     if agent is None and (router is None or not router.any_enabled()):
-        logger.warning("No LLM available — using heuristic business model graph.")
+        logger.warning("No LLM available - using heuristic business model graph.")
         return _heuristic_graph(registry)
 
     endpoints_json = registry.to_dict()
@@ -103,5 +103,5 @@ async def infer_business_model(
             parsed = result["parsed"]
         return BusinessModelGraph.from_dict(parsed)
     except Exception as exc:  # noqa: BLE001
-        logger.warning("LLM graph extraction failed (%s) — falling back to heuristic.", exc)
+        logger.warning("LLM graph extraction failed (%s) - falling back to heuristic.", exc)
         return _heuristic_graph(registry)

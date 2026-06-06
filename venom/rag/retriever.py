@@ -92,6 +92,6 @@ def annotate_cases(cases) -> None:
     for c in cases:
         query = f"{c.affected_endpoint} {c.hypothesis}"
         hits = r.retrieve(query, vuln_class=c.vulnerability_class.value, k=2)
-        c.rag_refs = [f"{h['title']} — {h['reference']}" for h in hits]
+        c.rag_refs = [f"{h['title']} - {h['reference']}" for h in hits]
         if hits and not c.rag_source:
             c.rag_source = hits[0]["reference"]

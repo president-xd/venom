@@ -1,5 +1,5 @@
 """
-Working memory ("the notebook") — a structured scratchpad for one engagement.
+Working memory ("the notebook") - a structured scratchpad for one engagement.
 
 Holds: facts (key/value), a running log of attempts (with outcome), and sub-goal
 status. The agent writes discoveries (codes, prices, totals, CSRF, session state)

@@ -43,7 +43,7 @@ _REMEDIATION = {
 
 
 def _confirmation_method(case: TestCase, evidence: dict) -> str:
-    """Describe — truthfully — how this finding was proven, from its real evidence.
+    """Describe - truthfully - how this finding was proven, from its real evidence.
     Never asserts a differential/state-delta where the evidence shows none."""
     if evidence.get("differential") or evidence.get("exploit_code"):
         return "differential oracle"
@@ -59,6 +59,26 @@ def _confirmation_method(case: TestCase, evidence: dict) -> str:
     if setup_ids and attack_ids and setup_ids != attack_ids:
         return "cross-identity differential"
     return "status response"
+
+
+def _concise_title(hypothesis: str) -> str:
+    """A short, readable headline for a finding (the FULL text lives in `description`).
+    Prefers the label before the first ':' (e.g. 'Email parser discrepancy'); otherwise
+    the first sentence; never mid-word truncation."""
+    h = " ".join((hypothesis or "Business-logic finding").split())
+    if ":" in h:
+        head = h.split(":", 1)[0].strip()
+        if 6 <= len(head) <= 72:
+            return head
+    for sep in (". ", "; "):
+        if sep in h:
+            first = h.split(sep, 1)[0].strip()
+            if 6 <= len(first) <= 96:
+                return first
+    if len(h) <= 96:
+        return h
+    cut = h[:96].rsplit(" ", 1)[0]      # break on a word boundary, no '...'
+    return cut
 
 
 def build_findings(cases: list[TestCase]) -> list[Finding]:
@@ -78,7 +98,8 @@ def build_findings(cases: list[TestCase]) -> list[Finding]:
                     evidence[f"step_{s.step}_response"] = s.response_excerpt
         findings.append(Finding(
             finding_id=f"BL-{next(_fid):03d}",
-            title=c.hypothesis[:120],
+            title=_concise_title(c.hypothesis),
+            description=c.hypothesis,                     # full explanation, never truncated
             severity=c.risk_rating,
             vulnerability_class=c.vulnerability_class,
             affected_endpoint=c.affected_endpoint,
@@ -114,10 +135,10 @@ def _markdown(scope: Scope, registry: EndpointRegistry, cases: list[TestCase],
 
     lines = [
         "# VENOM Business-Logic Pentest Report",
-        f"**Engagement:** {scope.engagement_id} — {scope.target_name}  ",
+        f"**Engagement:** {scope.engagement_id} - {scope.target_name}  ",
         f"**Generated:** {now}  ",
         f"**Authorized by:** {scope.authorized_by or '(unspecified)'}  ",
-        f"**Window:** {scope.authorization_date or '?'} → {scope.expiry_date or '?'}",
+        f"**Window:** {scope.authorization_date or '?'} -> {scope.expiry_date or '?'}",
         "",
         "## 1. Executive Summary",
         exec_summary or default_summary,
@@ -136,8 +157,8 @@ def _markdown(scope: Scope, registry: EndpointRegistry, cases: list[TestCase],
         "```",
         f"- Endpoints in registry: **{len(registry)}** "
         f"({len(registry.shadow())} shadow, {len(registry.with_tag('financial'))} financial)",
-        "- Method: business-model reconstruction → adversarial hypothesis generation "
-        "→ scope-guarded execution → verdict analysis.",
+        "- Method: business-model reconstruction -> adversarial hypothesis generation "
+        "-> scope-guarded execution -> verdict analysis.",
         "",
         "## 3. Findings",
     ]
@@ -145,21 +166,21 @@ def _markdown(scope: Scope, registry: EndpointRegistry, cases: list[TestCase],
         lines.append("_No exploitable findings confirmed in this run._")
     for f in findings:
         lines += [
-            f"### {f.finding_id} — {f.title}",
+            f"### {f.finding_id} - {f.title}",
             f"**Severity:** {f.severity.value}  |  **Class:** {f.vulnerability_class.value}  "
             f"|  **Endpoint:** `{f.affected_endpoint}`",
             "",
             f"**Business impact:** {f.business_impact}",
             "",
             f"**Confirmation:** {f.confirmation or 'evidence-based'} "
-            f"(origin: {f.origin or 'playbook'}) — proven, not a scanner signature.",
+            f"(origin: {f.origin or 'playbook'}) - proven, not a scanner signature.",
             "",
             f"**CVSS:** `{f.cvss_vector or 'n/a'}`",
             "",
             "**Reproduction:**",
         ]
         for s in f.reproduction_steps:
-            lines.append(f"- Step {s['step']}: `{s['method']} {s['path']}` — {s['description']} "
+            lines.append(f"- Step {s['step']}: `{s['method']} {s['path']}` - {s['description']} "
                          f"(got {s.get('actual_status')})")
         lines += [
             "",
@@ -173,7 +194,7 @@ def _markdown(scope: Scope, registry: EndpointRegistry, cases: list[TestCase],
             "",
         ]
     lines += [
-        "## 4. Appendix — All Test Cases (incl. negatives)",
+        "## 4. Appendix - All Test Cases (incl. negatives)",
         "| Test | Class | Endpoint | Verdict |",
         "|------|-------|----------|---------|",
     ]
@@ -201,7 +222,7 @@ async def _exec_summary(reporter, scope, findings, total) -> str:
 
 
 def _sarif(scope: Scope, findings: list[Finding]) -> dict:
-    """Minimal SARIF 2.1.0 — lets CI gate on VENOM findings."""
+    """Minimal SARIF 2.1.0 - lets CI gate on VENOM findings."""
     sev_map = {Severity.CRITICAL: "error", Severity.HIGH: "error",
                Severity.MEDIUM: "warning", Severity.LOW: "note", Severity.INFO: "note"}
     rules, results = {}, []
@@ -212,7 +233,7 @@ def _sarif(scope: Scope, findings: list[Finding]) -> dict:
         results.append({
             "ruleId": rid,
             "level": sev_map.get(f.severity, "warning"),
-            "message": {"text": f"{f.title} — {f.business_impact}"},
+            "message": {"text": f"{f.title} - {f.business_impact}"},
             "locations": [{"physicalLocation": {"artifactLocation": {
                 "uri": f.affected_endpoint or scope.target_name}}}],
             "properties": {"severity": f.severity.value, "cvss": f.cvss_vector,

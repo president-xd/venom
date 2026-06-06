@@ -1,5 +1,5 @@
 """
-Unified endpoint registry — the canonical view of the target's API surface,
+Unified endpoint registry - the canonical view of the target's API surface,
 merged from every ingestion source (OpenAPI, traffic, JS bundles, ...).
 """
 
@@ -147,7 +147,7 @@ class EndpointRegistry:
 
     # --- relationship discovery (used to build concrete, runnable exploits) ---
     def find_create(self, keyword: str = "") -> "Endpoint | None":
-        """POST to a collection (no path param) — i.e. a 'create' endpoint."""
+        """POST to a collection (no path param) - i.e. a 'create' endpoint."""
         for e in self._endpoints.values():
             if e.method.upper() == "POST" and "{" not in e.path and keyword in e.path.lower():
                 return e

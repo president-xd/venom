@@ -1,5 +1,5 @@
 """
-VENOM — Context-aware business-logic penetration testing agent.
+VENOM - Context-aware business-logic penetration testing agent.
 
 Ingests application context, reconstructs the intended business model, generates
 adversarial test cases, executes them safely within an authorized scope, and

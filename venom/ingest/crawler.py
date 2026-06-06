@@ -1,7 +1,7 @@
 """
 Live discovery crawler (web-app mode). Given a target URL (and an authenticated
 session), it walks the site within scope, extracts forms + links + parameters,
-and registers them as endpoints — so VENOM can be pointed at a URL instead of
+and registers them as endpoints - so VENOM can be pointed at a URL instead of
 being hand-fed artifacts. Optional forced-browsing uses a bundled wordlist to
 surface hidden/privileged paths (the raw material for access-control tests).
 
@@ -88,7 +88,7 @@ def _register_form(registry: EndpointRegistry, base: str, page_url: str, form: d
         hidden = i["type"] == "hidden"
         params.append(Parameter(name=i["name"], location="form", type="string", required=not hidden))
         # Capture default values (productId, price, redir, ...) so we can replay
-        # the exact form and tamper a single field — CSRF is re-scraped live.
+        # the exact form and tamper a single field - CSRF is re-scraped live.
         defaults[i["name"]] = i.get("value", "")
     ep = Endpoint(path=_path_of(action), method=form["method"], source=["crawl"],
                   parameters=params, form_defaults=defaults, discovered_on=_ref_of(page_url))
@@ -130,7 +130,7 @@ async def crawl(scope: Scope, registry: EndpointRegistry, *, seeds: list[str] | 
                 continue
             try:
                 resp = await client.request("GET", ref, follow_redirects=True)
-            except Exception as exc:  # noqa: BLE001 — scope or network
+            except Exception as exc:  # noqa: BLE001 - scope or network
                 logger.debug("crawl skip %s: %s", ref, exc)
                 continue
             if resp is None or resp.status_code >= 400:

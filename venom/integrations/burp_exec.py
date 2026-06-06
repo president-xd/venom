@@ -1,5 +1,5 @@
 """
-Burp execution adapter — routes selected operations through Burp's keyless local
+Burp execution adapter - routes selected operations through Burp's keyless local
 MCP server (set up via scripts/setup_burp.*). Two capabilities:
 
   - send(): replay a request through Burp (so it lands in Burp's history/Repeater

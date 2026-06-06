@@ -1,17 +1,17 @@
 """
-The agent loop — VENOM's brain at runtime.
+The agent loop - VENOM's brain at runtime.
 
-    observe → DECIDE (brain) → ACT (tool) → record to notebook → CHECK objective
-    → continue / backtrack to another strategy → on success: learn a skill.
+    observe -> DECIDE (brain) -> ACT (tool) -> record to notebook -> CHECK objective
+    -> continue / backtrack to another strategy -> on success: learn a skill.
 
 The `brain(context) -> decision` is pluggable: a deterministic stub in tests, an
 LLM in production. The loop, tools, memory, objective-checking and skill-learning
-are all deterministic and unit-tested independently of any model — so the
+are all deterministic and unit-tested independently of any model - so the
 *mechanism* is proven even where model quality isn't.
 
 Production autonomy features layered on the loop:
   - skill REPLAY: a high-scoring learned skill is replayed first (with dynamic
-    re-binding of per-session tokens) — solving a known class with zero LLM calls.
+    re-binding of per-session tokens) - solving a known class with zero LLM calls.
   - strategy BACKTRACKING: a stalled strategy is retired and fed back to the brain
     as "do not repeat"; identical failed actions are not re-executed.
   - COST/TIME caps: a wall-clock deadline and a step cap bound every hunt.
@@ -80,7 +80,7 @@ class Agent:
 
     async def _replay(self, skill: Skill, toolbox: Toolbox, objective: Objective) -> bool:
         """Replay a learned skill's structured steps (with token re-binding).
-        Returns True if it meets the objective — a fast, model-free solve."""
+        Returns True if it meets the objective - a fast, model-free solve."""
         steps = [s for s in (skill.steps or []) if s.get("tool")]
         if not steps:
             return False
@@ -105,6 +105,8 @@ class Agent:
         # the objective's verification paths so the win-oracle's own checks aren't blocked.
         toolbox.known_paths = {(e.path or "/").rstrip("/") or "/" for e in registry}
         toolbox.known_paths |= {"/", (objective.win_url or "/").rstrip("/") or "/"}
+        from .oneshot import auth_paths
+        toolbox.known_paths |= auth_paths(self.scope)   # re-login for takeover chains
         if objective.win_action and objective.win_action.get("path"):
             toolbox.known_paths.add(objective.win_action["path"].rstrip("/") or "/")
         surface = self._surface(registry)
@@ -139,7 +141,7 @@ class Agent:
                     self.last_run_stats = {"won": True, "steps": len(notebook.attempts),
                                            "via": "replay", "skill": best.name}
                     return [self._finding(objective, notebook, toolbox, f"replay:{best.name}")]
-                replayed = True  # replay attempted but didn't win → fall through to reasoning
+                replayed = True  # replay attempted but didn't win -> fall through to reasoning
 
             last_result = None
             won = False
@@ -150,7 +152,7 @@ class Agent:
                 steps_used = step + 1
                 # Cost/time cap: never let a hunt run unbounded.
                 if self.deadline_seconds is not None and (time.monotonic() - start) > self.deadline_seconds:
-                    logger.info("agent deadline (%.1fs) reached — stopping", self.deadline_seconds)
+                    logger.info("agent deadline (%.1fs) reached - stopping", self.deadline_seconds)
                     break
 
                 dead = sorted(s for s in notebook.strategies_tried()
@@ -206,8 +208,18 @@ class Agent:
                     "check_objective"))
                 if state_changing:
                     chk = res if tool == "check_objective" else await toolbox.check_objective()
+                    met = bool(chk.data.get("met"))
+                    # The bare win-action re-run only proves SESSION escalation. When the
+                    # privilege is carried IN the winning request (a looted token/header,
+                    # a tampered price), the differential still holds if the exploit's own
+                    # trace shows the win-action path succeeding - accept that too. Same
+                    # rule oneshot uses, so `hunt` confirms the trace-based labs as well.
+                    if not met and objective.win_action and tool in (
+                            "run_exploit_code", "exploit", "run_code", "write_exploit", "code"):
+                        if objective.action_succeeded_in_trace((res.data or {}).get("trace")):
+                            met = True
                     # A real win = the objective is met AND it was NOT already met at baseline.
-                    if chk.data.get("met") and not baseline_ok:
+                    if met and not baseline_ok:
                         won = True
                         winning_strategy = strategy
                         break

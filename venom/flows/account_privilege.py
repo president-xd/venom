@@ -3,14 +3,14 @@ Trusted-identity account-management flow ("flawed privilege assumption").
 
 Some account-management actions (change-password, change-email, delete) carry the
 *account owner* as a request field (a hidden `username`/`id`) and act on whatever
-identity the client supplies — instead of the authenticated session owner. When a
+identity the client supplies - instead of the authenticated session owner. When a
 verification step (current-password / token) can additionally be omitted, a
 low-privileged user can overwrite a privileged account's credentials.
 
-Chain: log in as the provided low-priv identity → GET /my-account (scrape csrf) →
+Chain: log in as the provided low-priv identity -> GET /my-account (scrape csrf) ->
 POST change-password with `username=<privileged account>` and the verification
-field OMITTED → log in fresh as the privileged account with the new password →
-reach /admin → (opt-in) perform the destructive objective and check solved.
+field OMITTED -> log in fresh as the privileged account with the new password ->
+reach /admin -> (opt-in) perform the destructive objective and check solved.
 """
 
 from __future__ import annotations

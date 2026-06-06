@@ -1,5 +1,5 @@
 """
-Authorization scope — the hard safety boundary for the entire agent.
+Authorization scope - the hard safety boundary for the entire agent.
 
 The scope object is the FIRST thing loaded before any action, and these rules
 are non-negotiable:
@@ -45,7 +45,7 @@ class Scope:
     target_name: str
     authorized_base_urls: list[str]
     authorized_user_roles: list[str] = field(default_factory=list)
-    # Authenticated test identities. Each: {"name","role","auth":{...}} — see
+    # Authenticated test identities. Each: {"name","role","auth":{...}} - see
     # venom.engine.auth.Identity for the supported auth types (login/bearer/cookie/basic).
     identities: list[dict] = field(default_factory=list)
     out_of_scope: list[str] = field(default_factory=list)
@@ -121,7 +121,16 @@ class Scope:
             return False
         if (c.hostname or "").lower() != (a.hostname or "").lower():
             return False
-        if (c.port or 0) != (a.port or 0) and a.port:
+        # Port check uses EFFECTIVE ports (explicit, else the scheme default) so an
+        # authorized "https://host" (-> 443) does not silently admit "https://host:8443"
+        # - a different service on the same host. Only enforced when both ports are
+        # determinable; a bare host-only scope ("host", no scheme/port) stays lenient.
+        def _eff_port(u):
+            if u.port:
+                return u.port
+            return {"http": 80, "https": 443}.get((u.scheme or "").lower())
+        a_port, c_port = _eff_port(a), _eff_port(c)
+        if a_port is not None and c_port is not None and a_port != c_port:
             return False
         # Path prefix: authorized "/api" gates everything under it; "/" gates all.
         a_path = a.path.rstrip("/")
@@ -140,11 +149,19 @@ class Scope:
 
     DESTRUCTIVE_METHODS = {"DELETE", "PUT", "PATCH"}
 
-    def assert_request_allowed(self, method: str, url: str, *, destructive: bool = False) -> None:
-        """The single chokepoint. Raises ScopeError if the request is not allowed."""
+    def assert_request_allowed(self, method: str, url: str, *, destructive: bool = False,
+                               count_destructive: bool = True) -> None:
+        """The single chokepoint. Raises ScopeError if the request is not allowed.
+
+        `count_destructive=False` runs every check (kill-switch, window, host
+        allow-list, destructive PERMISSION and the budget LIMIT) but does NOT consume
+        a slot from the destructive budget. It exists so the per-request redirect
+        guard (which re-validates each hop of a redirect chain) can enforce scope on
+        followed redirects WITHOUT double-counting the budget already charged for the
+        originating request."""
         # Operational kill-switch: an operator can halt ALL outbound requests instantly.
         if os.getenv("VENOM_KILL_SWITCH", "").lower() in ("1", "true", "yes"):
-            raise ScopeError("KILL SWITCH engaged (VENOM_KILL_SWITCH) — all requests halted.")
+            raise ScopeError("KILL SWITCH engaged (VENOM_KILL_SWITCH) - all requests halted.")
         self.validate_window()
         if not self.is_url_in_scope(url):
             raise ScopeError(
@@ -152,17 +169,23 @@ class Scope:
                 f"{self.authorized_base_urls} (or is explicitly out_of_scope). Request blocked."
             )
         if destructive:
+            # Permission is enforced on EVERY hop (including followed redirects).
             if not self.allow_destructive:
                 raise ScopeError(
                     f"DESTRUCTIVE action blocked: {method} {url}. "
                     "Set allow_destructive=true in the scope to permit this."
                 )
-            # Governance: cap the number of destructive actions per engagement.
-            if self.max_destructive_actions:
+            # Governance: cap the number of destructive actions per engagement. The
+            # budget LIMIT + COUNT belong to the originating request() (one logical
+            # operator action), so the per-hop redirect guard passes count_destructive
+            # =False to enforce permission only - without re-checking the limit (which
+            # the originating call, having just consumed the last slot, would trip) or
+            # double-charging a slot for the same action's redirect.
+            if count_destructive and self.max_destructive_actions:
                 if self._destructive_used >= self.max_destructive_actions:
                     raise ScopeError(
                         f"DESTRUCTIVE budget exhausted ({self._destructive_used}/"
-                        f"{self.max_destructive_actions}) — further state-changing actions blocked."
+                        f"{self.max_destructive_actions}) - further state-changing actions blocked."
                     )
                 self._destructive_used += 1
 
@@ -171,7 +194,7 @@ class Scope:
 
     def summary(self) -> str:
         return (
-            f"Engagement {self.engagement_id} — target '{self.target_name}'\n"
+            f"Engagement {self.engagement_id} - target '{self.target_name}'\n"
             f"  Authorized hosts : {', '.join(self.authorized_base_urls)}\n"
             f"  Out of scope     : {', '.join(self.out_of_scope) or '(none)'}\n"
             f"  Roles            : {', '.join(self.authorized_user_roles) or '(none)'}\n"

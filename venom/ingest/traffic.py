@@ -1,5 +1,5 @@
 """
-Behavioral ingestion (Stage 2) — HAR captures and Burp Suite XML exports.
+Behavioral ingestion (Stage 2) - HAR captures and Burp Suite XML exports.
 
 Endpoints seen in traffic but absent from the OpenAPI spec are marked as shadow
 endpoints (highest-priority targets). A simple sequence map records which

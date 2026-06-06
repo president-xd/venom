@@ -23,7 +23,7 @@ from venom.web.runs import MANAGER
 def test_vuln_classes_from_real_kb():
     from venom.knowledge.business_logic import BUSINESS_LOGIC_KB
 
-    status, body, _ = routes.handle("GET", "/api/vuln-classes", {}, {})
+    status, body, _, _ = routes.handle("GET", "/api/vuln-classes", {}, {})
     assert status == 200
     classes = body["classes"]
     assert len(classes) == len(BUSINESS_LOGIC_KB)        # backed by the real KB
@@ -31,45 +31,58 @@ def test_vuln_classes_from_real_kb():
 
 
 def test_agents_and_providers_and_status():
-    _, agents, _ = routes.handle("GET", "/api/agents", {}, {})
+    _, agents, _, _ = routes.handle("GET", "/api/agents", {}, {})
     roles = {a["role"] for a in agents["fleet"]}
     assert {"orchestrator", "codegen", "hypothesis"} <= roles
     # models mirror the real fleet (and the prototype's run screen)
     models = {a["model"] for a in agents["fleet"]}
     assert any("deepseek" in m for m in models)
 
-    _, providers, _ = routes.handle("GET", "/api/providers", {}, {})
+    _, providers, _, _ = routes.handle("GET", "/api/providers", {}, {})
     assert "providers" in providers
     # secrets must never leak through the API
     for p in providers["providers"]:
         assert "api_key" not in p and "key" not in p
 
-    _, status, _ = routes.handle("GET", "/api/status", {}, {})
+    _, status, _, _ = routes.handle("GET", "/api/status", {}, {})
     assert status["scope_guard"] == "armed"
     assert status["redaction"] is True
 
 
 def test_scope_validate_ok_and_rejected():
-    _, ok, _ = routes.handle("POST", "/api/scope/validate", {}, {"url": "https://x.example.com"})
+    _, ok, _, _ = routes.handle("POST", "/api/scope/validate", {}, {"url": "https://x.example.com"})
     assert ok["ok"] is True and "summary" in ok
 
-    _, missing, _ = routes.handle("POST", "/api/scope/validate", {}, {"url": ""})
+    _, missing, _, _ = routes.handle("POST", "/api/scope/validate", {}, {"url": ""})
     assert missing["ok"] is False
 
-    _, expired, _ = routes.handle("POST", "/api/scope/validate", {},
+    _, expired, _, _ = routes.handle("POST", "/api/scope/validate", {},
                                   {"url": "https://x.example.com", "expiry_date": "2000-01-01T00:00:00Z"})
     assert expired["ok"] is False and "expired" in expired["error"].lower()
 
 
-def test_engagements_has_no_demo_rows():
-    # The dashboard shows only real runs — no seed/demo engagements.
-    _, body, _ = routes.handle("GET", "/api/engagements", {}, {})
-    assert isinstance(body["engagements"], list)
+def _login(username="op", password="pw"):
+    """Seed + log in a user; return the session cookie for protected-endpoint calls."""
+    from venom.web import auth
+    auth.add_user(username, password)
+    _, _, _, hdr = routes.handle("POST", "/api/login", {}, {"username": username, "password": password}, "")
+    return hdr["Set-Cookie"].split(";")[0]
+
+
+def test_engagements_requires_auth_and_filters(tmp_path, monkeypatch):
+    monkeypatch.setenv("VENOM_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("VENOM_WEB_SECRET", "t")
+    # unauthenticated -> 401 (per-user data is gated)
+    st, _, _, _ = routes.handle("GET", "/api/engagements", {}, {}, "")
+    assert st == 401
+    # authenticated -> 200, a list, and never any demo rows
+    st, body, _, _ = routes.handle("GET", "/api/engagements", {}, {}, _login())
+    assert st == 200 and isinstance(body["engagements"], list)
     assert not any(e.get("demo") for e in body["engagements"])
 
 
 def test_unknown_route_404():
-    status, _, _ = routes.handle("GET", "/api/nope", {}, {})
+    status, _, _, _ = routes.handle("GET", "/api/nope", {}, {})
     assert status == 404
 
 
@@ -312,8 +325,9 @@ def test_launch_runs_real_llm_hunt(tmp_path, monkeypatch):
     """End-to-end LLM-driven hunt against VulnLab (recon -> infer -> hypothesize ->
     exploit -> verify). Gated: it makes real model calls."""
     monkeypatch.setenv("VENOM_DATA_DIR", str(tmp_path))
+    cookie = _login("op", "pw")            # per-run endpoints are owner-gated
     run_id = MANAGER.start({"target_name": "VulnLab", "rate": 50, "destructive": True,
-                            "objective": "find and exploit a business-logic flaw"})
+                            "owner": "op", "objective": "find and exploit a business-logic flaw"})
     run = MANAGER.get(run_id)
     deadline = time.time() + 300
     while not run.finished and time.time() < deadline:
@@ -327,10 +341,10 @@ def test_launch_runs_real_llm_hunt(tmp_path, monkeypatch):
         assert f0["oracle"] and isinstance(f0["log"], list)
 
     # the findings endpoint resolves the run via the shared manager
-    status, body, _ = routes.handle("GET", f"/api/runs/{run_id}/findings", {}, {})
+    status, body, _, _ = routes.handle("GET", f"/api/runs/{run_id}/findings", {}, {}, cookie)
     assert status == 200
     assert len(body["findings"]) == len(run.findings)
 
     # the real artifacts were written and are downloadable
-    rstatus, report, ctype = routes.handle("GET", f"/api/runs/{run_id}/report.md", {}, {})
+    rstatus, report, ctype, _ = routes.handle("GET", f"/api/runs/{run_id}/report.md", {}, {}, cookie)
     assert rstatus == 200 and "VENOM" in report

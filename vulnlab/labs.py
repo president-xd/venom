@@ -1,5 +1,5 @@
 """
-VulnLab labs — a registry of deliberately-vulnerable business-logic flaws.
+VulnLab labs - a registry of deliberately-vulnerable business-logic flaws.
 
 Each lab is a REAL, exploitable flaw (no fake banners, no shortcuts): the lab's
 `solved` flag flips ONLY when the genuine exploit is performed. Difficulty spans
@@ -20,7 +20,7 @@ tests can consume one source of truth.
 Oracle modes exercised
 ----------------------
 - DIFFERENTIAL (win_action set): a forbidden action ("delete carlos") that is 403
-  for the un-escalated user and 200 after the exploit — app-agnostic, no banner.
+  for the un-escalated user and 200 after the exploit - app-agnostic, no banner.
 - LEGACY MARKER (win_action=None): economic flaws whose win is "purchase made";
   proven here by the lab's own ground-truth solved flag / banner.
 
@@ -43,7 +43,7 @@ from urllib.parse import parse_qs
 # ----------------------------------------------------------------- constants
 PIN = "7391"
 ADMIN_TOKEN = "adm_9f3c1e7b"
-ADMIN_DOMAIN = "@acme-corp.com"          # 14 chars — staff domain (auto-admin)
+ADMIN_DOMAIN = "@acme-corp.com"          # 14 chars - staff domain (auto-admin)
 EMAIL_MAXLEN = 30                        # silent truncation width (the bug)
 # administrator's real password is intentionally unguessable; the trusted-identity
 # lab is the only way to take the account over.
@@ -95,7 +95,7 @@ def _decode_jwt(token: str) -> Optional[dict]:
     """Decode+verify a compact JWS. Returns the claims dict if the token is
     acceptable, else None.
 
-    FLAW: the 'none' algorithm is honored — an UNSIGNED token is trusted. The
+    FLAW: the 'none' algorithm is honored - an UNSIGNED token is trusted. The
     HS256 path is verified properly against JWT_SECRET (which the attacker does not
     have), so the only forgery route is alg=none. This is the classic JWT
     algorithm-confusion / unsecured-JWS vulnerability.
@@ -152,11 +152,20 @@ def h_price(state, method, path, query, cookies, sess, form, headers=None):
     if path == "/price/buy" and method == "POST":
         if form.get("csrf") == "PCSRF" and form.get("product") == "jacket":
             try:
-                if int(form.get("price", "1337")) < 100:        # FLAW: trusts client price
-                    state["solved"]["price"] = True
+                paid = int(form.get("price", "1337"))
             except ValueError:
-                pass
-        return 200, _page(_banner(state, "price") + "order processed"), None
+                paid = 1337
+            if paid < 100:                                       # FLAW: trusts client price
+                state["solved"]["price"] = True
+                # Realistic, exploit-specific success state (no lab banner needed):
+                # the order ships at the tampered price. This string appears ONLY when
+                # the price was undercut, so it is a sound differential marker.
+                return 200, _page(_banner(state, "price") +
+                                  f"ORDER CONFIRMED: leather jacket dispatched, charged {paid} "
+                                  f"(list price 1337)"), None
+            return 200, _page(_banner(state, "price") +
+                              f"order processed at the listed price ({paid})"), None
+        return 200, _page(_banner(state, "price") + "invalid order"), None
     return None
 
 
@@ -319,7 +328,11 @@ def h_workflow(state, method, path, query, cookies, sess, form, headers=None):
         order = sess.get("order") if sess else None
         if order and "jacket" in order["items"]:                 # FLAW: doesn't verify order['paid']
             state["solved"]["workflow"] = True
-            return 200, _page("order confirmed; jacket dispatched"), None
+            paid = bool(order.get("paid"))
+            # Realistic state: the order ships. When it shipped WITHOUT PAYMENT the
+            # confirmation says so - that distinct phrase is the differential marker.
+            flag = "" if paid else " WITHOUT PAYMENT"
+            return 200, _page(f"order confirmed{flag}; jacket dispatched"), None
         return 200, _page("nothing to confirm"), None
     return None
 
@@ -443,7 +456,7 @@ def h_emailtrunc(state, method, path, query, cookies, sess, form, headers=None):
 # ENTERPRISE (API / auth-token flaw classes)
 # =====================================================================
 
-# ---- 12. JWT alg:none — unsigned token accepted as admin -----------------
+# ---- 12. JWT alg:none - unsigned token accepted as admin -----------------
 def h_jwt(state, method, path, query, cookies, sess, form, headers=None):
     headers = _norm_headers(headers)
     if path == "/jwt" and method == "GET":
@@ -547,7 +560,7 @@ def h_refund(state, method, path, query, cookies, sess, form, headers=None):
         except ValueError:
             return 200, _page("bad amount"), None
         # FLAW: refund amount is neither capped to the order total nor checked >0,
-        # and the order is not marked refunded — so it can be over-claimed.
+        # and the order is not marked refunded - so it can be over-claimed.
         if form.get("order_id") == "1":
             sess["credit"] += amt
             return 200, _page(f"refund of {amt} issued for order #1; credit {sess['credit']}"), None
@@ -562,7 +575,7 @@ def h_refund(state, method, path, query, cookies, sess, form, headers=None):
 
 
 # =====================================================================
-# ENTERPRISE II — realistic application surfaces (banking, SaaS, API,
+# ENTERPRISE II - realistic application surfaces (banking, SaaS, API,
 # billing, finance, healthcare, DevOps). Each is a genuine business-logic
 # flaw, provable by a deterministic exploit; difficulty spans medium->hard.
 # =====================================================================
@@ -591,14 +604,20 @@ def h_bank(state, method, path, query, cookies, sess, form, headers=None):
         except ValueError:
             return 200, _page("bad amount"), None
         # FLAW: the debited 'from_account' is taken from the request, not the session
-        # owner — so you can move money out of any account, including the treasury.
+        # owner - so you can move money out of any account, including the treasury.
         if frm in bank and amt > 0 and bank[frm] >= amt:
             bank[frm] -= amt
             bank[to] = bank.get(to, 0) + amt
-            if bank.get("wiener", 0) >= 100_000:
+            wbal = bank.get("wiener", 0)
+            # Realistic compliance signal: a large resulting balance trips a
+            # high-value alert. This phrase appears ONLY once the account has been
+            # enriched past the threshold, so it is a sound differential marker
+            # (a legitimate 1-credit transfer from your own account never trips it).
+            if wbal >= 100_000:
                 state["solved"]["bank"] = True
-            return 200, _page(f"transferred {amt} from {frm} to {to}; "
-                              f"wiener balance {bank.get('wiener', 0)}"), None
+                return 200, _page(f"transferred {amt} from {frm} to {to}; wiener balance "
+                                  f"{wbal} - LARGE-BALANCE ALERT (compliance review)"), None
+            return 200, _page(f"transferred {amt} from {frm} to {to}; wiener balance {wbal}"), None
         return 200, _page("transfer declined"), None
     return None
 
@@ -641,7 +660,7 @@ def h_scope(state, method, path, query, cookies, sess, form, headers=None):
                           "<input name=username><input name=scope></form>"), None
     if path == "/devapi/users/delete" and method == "POST":
         # FLAW: authorization uses the client-supplied 'scope' field, not the key's
-        # real (read-only) scope — privilege escalation by asking for more.
+        # real (read-only) scope - privilege escalation by asking for more.
         if headers.get("x-api-key") == "sk_live_reader" \
            and str(form.get("scope", "")).lower() in ("admin", "write", "*") \
            and form.get("username") == "carlos":
@@ -670,7 +689,7 @@ def h_billing(state, method, path, query, cookies, sess, form, headers=None):
             return 200, _page("upgraded to premium (free trial, no charge)"), None
         if new == "free" and sess["plan"] == "premium":
             # FLAW: a downgrade credits a full month's proration even though the trial
-            # was never paid for — repeat to accrue unlimited credit.
+            # was never paid for - repeat to accrue unlimited credit.
             sess["plan"] = "free"
             sess["credit"] += 100
             return 200, _page(f"downgraded; prorated credit refunded. credit {sess['credit']}"), None
@@ -737,13 +756,17 @@ def h_invoice(state, method, path, query, cookies, sess, form, headers=None):
         return 200, _page(f"created {iid}: amount {amt}, approved={inv[iid]['approved']}"), None
     if path == "/ap/pay" and method == "POST":
         rec = state.get("invoices", {}).get(form.get("invoice_id", ""))
-        # FLAW: payment never enforces the approval gate — an unapproved high-value
+        # FLAW: payment never enforces the approval gate - an unapproved high-value
         # invoice can be paid straight to the attacker's vendor account.
         if rec and not rec["paid"]:
             rec["paid"] = True
+            base = f"paid {form.get('invoice_id')} ({rec['amount']}) to {rec['payee']}"
             if not rec["approved"]:
                 state["solved"]["invoice"] = True
-            return 200, _page(f"paid {form.get('invoice_id')} ({rec['amount']}) to {rec['payee']}"), None
+                # Distinct audit marker: the payment cleared without the required
+                # approval. Only emitted on the unapproved path -> sound differential.
+                return 200, _page(base + " - PAID WITHOUT APPROVAL"), None
+            return 200, _page(base), None
         return 200, _page("cannot pay"), None
     return None
 
@@ -814,7 +837,7 @@ def h_files(state, method, path, query, cookies, sess, form, headers=None):
         return 401, _page("login first"), None
     if path == "/drive/share" and method == "POST":
         # FLAW: the server applies whatever permission you ask for without checking
-        # that you're allowed to grant it — escalate yourself from viewer to owner.
+        # that you're allowed to grant it - escalate yourself from viewer to owner.
         if form.get("file") == "Q4-Board-Deck":
             sess.setdefault("drive_roles", {})[form["file"]] = form.get("role", "viewer")
             return 200, _page(f"sharing for {form['file']} set to {form.get('role')}"), None
@@ -840,7 +863,7 @@ def h_deploy(state, method, path, query, cookies, sess, form, headers=None):
         return 401, _page("login first"), None
     if path == "/ci/deploy" and method == "POST":
         # FLAW: the target environment is taken from the request and never checked
-        # against the user's role — 'production' is only gated in the UI (BFLA).
+        # against the user's role - 'production' is only gated in the UI (BFLA).
         if str(form.get("env", "")).lower() in ("production", "prod"):
             state["solved"]["deploy"] = True
             return 200, _page(f"deployed {form.get('service')} to PRODUCTION"), None
@@ -860,7 +883,7 @@ def h_referral(state, method, path, query, cookies, sess, form, headers=None):
         return 401, _page("login first"), None
     if path == "/refer/use" and method == "POST":
         sess.setdefault("reward", 0)
-        # FLAW: no check that referrer != referee, and no single-use — refer yourself
+        # FLAW: no check that referrer != referee, and no single-use - refer yourself
         # repeatedly to mint reward credit.
         if form.get("code") == "WIENER10":
             sess["reward"] += 10
@@ -875,7 +898,7 @@ def h_referral(state, method, path, query, cookies, sess, form, headers=None):
 
 
 # =====================================================================
-# ENTERPRISE III — more real-world surfaces (GraphQL, legacy auth, ERP,
+# ENTERPRISE III - more real-world surfaces (GraphQL, legacy auth, ERP,
 # fintech, IAM, payments, batch APIs, licensing, network-trust, metering).
 # Each is a genuine business-logic flaw with a deterministic proof.
 # =====================================================================
@@ -897,7 +920,7 @@ def h_graphql(state, method, path, query, cookies, sess, form, headers=None):
         m = re.search(r'user\s*\(\s*id\s*:\s*"?(\w+)"?', q, re.I)
         if m and re.search(r'apitoken', q, re.I):
             u = USERS.get(m.group(1))
-            # FLAW: no field-level authz — apiToken is returned for ANY user object.
+            # FLAW: no field-level authz - apiToken is returned for ANY user object.
             if u:
                 return 200, json.dumps({"data": {"user": {"name": u[0], "role": u[1],
                                                           "apiToken": u[2]}}}), None
@@ -943,7 +966,7 @@ def h_cookie(state, method, path, query, cookies, sess, form, headers=None):
 def h_selfapprove(state, method, path, query, cookies, sess, form, headers=None):
     if path == "/erp" and method == "GET":
         return 200, _page(_banner(state, "selfapprove") +
-                          "<h2>Acme ERP — Expenses</h2>Expenses over 1000 must be approved by a "
+                          "<h2>Acme ERP - Expenses</h2>Expenses over 1000 must be approved by a "
                           "DIFFERENT manager before they can be paid. "
                           "<form action=/erp/submit method=POST><input name=amount></form>"
                           "<form action=/erp/approve method=POST><input name=expense_id></form>"
@@ -962,17 +985,23 @@ def h_selfapprove(state, method, path, query, cookies, sess, form, headers=None)
     if path == "/erp/approve" and method == "POST":
         rec = state.get("expenses", {}).get(form.get("expense_id", ""))
         if rec:
-            # FLAW: no segregation of duties — the submitter can approve their own expense.
+            # FLAW: no segregation of duties - the submitter can approve their own expense.
             rec["approved"] = True
+            rec["approver"] = sess.get("user")
             return 200, _page(f"approved {form.get('expense_id')}"), None
         return 200, _page("no such expense"), None
     if path == "/erp/pay" and method == "POST":
         rec = state.get("expenses", {}).get(form.get("expense_id", ""))
         if rec and rec["approved"] and not rec["paid"]:
             rec["paid"] = True
-            if rec["amount"] > 1000:
+            base = f"paid {form.get('expense_id')} ({rec['amount']})"
+            self_approved = rec.get("approver") == rec.get("submitter")
+            if rec["amount"] > 1000 and self_approved:
                 state["solved"]["selfapprove"] = True
-            return 200, _page(f"paid {form.get('expense_id')} ({rec['amount']})"), None
+                # Distinct control-failure marker: a >1000 expense the submitter
+                # approved themselves cleared payment -> segregation-of-duties breach.
+                return 200, _page(base + " - SEGREGATION-OF-DUTIES VIOLATION (self-approved)"), None
+            return 200, _page(base), None
         return 200, _page("cannot pay"), None
     return None
 
@@ -989,7 +1018,7 @@ def h_stack(state, method, path, query, cookies, sess, form, headers=None):
         return 401, _page("login first"), None
     if path == "/stack/apply" and method == "POST":
         sess.setdefault("price", 50)
-        # FLAW: no mutual-exclusion / single-use — discounts stack without limit.
+        # FLAW: no mutual-exclusion / single-use - discounts stack without limit.
         if form.get("code") in ("SAVE30", "EXTRA30"):
             sess["price"] -= 30
             return 200, _page(f"applied {form.get('code')}; price now {sess['price']}"), None
@@ -1052,7 +1081,7 @@ def h_iam(state, method, path, query, cookies, sess, form, headers=None):
         return 401, _page("login first"), None
     if path == "/iam/group/add" and method == "POST":
         g = sess.setdefault("groups", ["developers"])
-        # FLAW: no authorization on group assignment — self-add to any group.
+        # FLAW: no authorization on group assignment - self-add to any group.
         if form.get("group") and form["group"] not in g:
             g.append(form["group"])
         return 200, _page(f"groups: {g}"), None
@@ -1203,121 +1232,157 @@ def h_quota(state, method, path, query, cookies, sess, form, headers=None):
 # =====================================================================
 # REGISTRY
 # =====================================================================
+# Every lab is verified the ENTERPRISE way - a differential win_action that is
+# DENIED at baseline (403, or the honest/default request yields no success marker)
+# and SUCCEEDS only after the exploit, proven by a REALISTIC state marker the app
+# genuinely emits (never the 'is-solved' banner). For access-control flaws the
+# denial is a 403; for economic/logic flaws the baseline request is the *honest*
+# one (buy at list price, deploy to staging, transfer 1 from your own account) which
+# returns no success marker, while the exploited request returns a distinct, real
+# success string. This is exactly how a real engagement confirms a finding.
 LABS: list[Lab] = [
     # ---- easy ----
     Lab(name="price", difficulty="easy", solved_key="price", title="Client-trusted price",
         objective="Buy the leather jacket for under 100.",
-        win_url="/price", win_action=None, seeds=["/price"],
+        win_url="/price", seeds=["/price"],
+        win_action={"method": "POST", "path": "/price/buy",
+                    "data": {"csrf": "PCSRF", "product": "jacket", "price": "1337"}},
+        success_text="ORDER CONFIRMED",
         index_link="<a href=/price>price</a>", vuln_id="client-side-trust",
         handler=h_price),
     Lab(name="idor", difficulty="easy", solved_key="idor", title="IDOR account read",
         objective="Delete the user 'carlos'.",
-        win_url="/idor", success_text="deleted", seeds=["/idor"],
+        win_url="/idor", success_text="deleted carlos", seeds=["/idor"],
         win_action={"method": "POST", "path": "/idor/delete", "data": {"username": "carlos"}},
         index_link="<a href=/idor>idor</a>", vuln_id="broken-object-level-auth",
         handler=h_idor),
     Lab(name="coupon", difficulty="easy", solved_key="coupon", title="Coupon reuse (no idempotency)",
         objective="Obtain the jacket for free.",
-        win_url="/coupon", win_action=None, seeds=["/coupon"],
+        win_url="/coupon", seeds=["/coupon"],
+        win_action={"method": "POST", "path": "/coupon/checkout", "data": {}},
+        success_text="purchased jacket for free",
         index_link="<a href=/coupon>coupon</a>", vuln_id="coupon-reuse",
         handler=h_coupon),
     # ---- medium ----
     Lab(name="pin", difficulty="medium", solved_key="pin", title="PIN brute force (no rate limit)",
         objective="Log in (wiener:peter) and delete the user 'carlos'.",
-        win_url="/pin", success_text="deleted", seeds=["/pin"],
+        win_url="/pin", success_text="deleted carlos", seeds=["/pin"],
         win_action={"method": "POST", "path": "/pin/delete", "data": {"username": "carlos"}},
         index_link="<a href=/pin>pin</a>", vuln_id="missing-rate-limit",
         handler=h_pin),
     Lab(name="mass", difficulty="medium", solved_key="mass", title="Mass assignment (role)",
         objective="Log in (wiener:peter) and delete the user 'carlos'.",
-        win_url="/mass", success_text="deleted", seeds=["/mass", "/mass/account"],
+        win_url="/mass", success_text="deleted carlos", seeds=["/mass", "/mass/account"],
         win_action={"method": "POST", "path": "/mass/delete", "data": {"username": "carlos"}},
         index_link="<a href=/mass>mass</a>", vuln_id="mass-assignment",
         handler=h_mass),
     Lab(name="negqty", difficulty="medium", solved_key="negqty", title="Negative quantity balancing",
         objective="Buy the jacket although you only have 100 credits.",
-        win_url="/negqty", win_action=None, seeds=["/negqty"],
+        win_url="/negqty", seeds=["/negqty"],
+        win_action={"method": "POST", "path": "/negqty/checkout", "data": {}},
+        success_text="purchased; charged",
         index_link="<a href=/negqty>negqty</a>", vuln_id="negative-quantity",
         handler=h_negqty),
     Lab(name="workflow", difficulty="medium", solved_key="workflow", title="Workflow / payment skip",
         objective="Obtain a jacket without paying.",
-        win_url="/shop", win_action=None, seeds=["/shop"],
+        win_url="/shop", seeds=["/shop"],
+        win_action={"method": "POST", "path": "/shop/confirm", "data": {}},
+        success_text="jacket dispatched",
         index_link="<a href=/shop>workflow</a>", vuln_id="sequence-bypass",
         handler=h_workflow),
     # ---- hard ----
     Lab(name="trustid", difficulty="hard", solved_key="trustid", title="Trusted-identity password change",
         objective="Log in (wiener:peter) and delete the user 'carlos'.",
-        win_url="/account", success_text="deleted", seeds=["/account"],
+        win_url="/account", success_text="deleted carlos", seeds=["/account"],
         win_action={"method": "POST", "path": "/account/delete", "data": {"username": "carlos"}},
         index_link="<a href=/account>account</a>", vuln_id="trusted-identity-param",
         handler=h_trustid),
     Lab(name="io", difficulty="hard", solved_key="io", title="Integer overflow on order total",
         objective="Buy the jacket although you only have 100 credits.",
-        win_url="/io", win_action=None, seeds=["/io"],
+        win_url="/io", seeds=["/io"],
+        win_action={"method": "POST", "path": "/io/buy", "data": {"qty": "1"}},
+        success_text="jackets; charged",
         index_link="<a href=/io>io</a>", vuln_id="integer-overflow",
         handler=h_intoverflow),
     Lab(name="money", difficulty="hard", solved_key="money", title="Infinite money (gift-card arbitrage)",
         objective="Buy the 160-credit jacket starting from only 100 credits.",
-        win_url="/money", win_action=None, seeds=["/money"],
+        win_url="/money", seeds=["/money"],
+        win_action={"method": "POST", "path": "/money/buyjacket", "data": {}},
+        success_text="purchased the jacket",
         index_link="<a href=/money>money</a>", vuln_id="infinite-money",
         handler=h_money),
     Lab(name="reg", difficulty="hard", solved_key="reg", title="Email truncation -> privileged domain",
         objective="Register an account and delete the user 'carlos'.",
-        win_url="/reg", success_text="deleted", seeds=["/reg"],
+        win_url="/reg", success_text="deleted carlos", seeds=["/reg"],
         win_action={"method": "POST", "path": "/reg/delete", "data": {"username": "carlos"}},
         index_link="<a href=/reg>reg</a>", vuln_id="exceptional-input-truncation",
         handler=h_emailtrunc),
     # ---- enterprise (API / auth-token) ----
     Lab(name="jwt", difficulty="hard", solved_key="jwt", title="JWT alg:none forgery",
         objective="Delete the user 'carlos' via the admin API.",
-        win_url="/jwt", win_action=None, seeds=["/jwt"],
+        win_url="/jwt", success_text="deleted carlos", seeds=["/jwt"],
+        win_action={"method": "POST", "path": "/jwt/delete", "data": {"username": "carlos"}},
         index_link="<a href=/jwt>jwt</a>", vuln_id="jwt-alg-none",
         handler=h_jwt),
     Lab(name="bola", difficulty="medium", solved_key="bola", title="BOLA API key disclosure",
         objective="Delete the user 'carlos' via the admin API.",
-        win_url="/api", win_action=None, seeds=["/api"],
+        win_url="/api", success_text="deleted", seeds=["/api"],
+        win_action={"method": "POST", "path": "/api/delete", "data": {"username": "carlos"}},
         index_link="<a href=/api>bola</a>", vuln_id="broken-object-level-auth",
         handler=h_bola),
     Lab(name="reset", difficulty="medium", solved_key="reset", title="Password-reset token disclosure",
         objective="Log in (wiener:peter) and delete the user 'carlos'.",
-        win_url="/reset", success_text="deleted", seeds=["/reset"],
+        win_url="/reset", success_text="deleted carlos", seeds=["/reset"],
         win_action={"method": "POST", "path": "/reset/delete", "data": {"username": "carlos"}},
         index_link="<a href=/reset>reset</a>", vuln_id="reset-token-disclosure",
         handler=h_reset),
     Lab(name="refund", difficulty="medium", solved_key="refund", title="Unvalidated refund amount",
         objective="Buy the 200-credit jacket starting from only 100 credits.",
-        win_url="/refund", win_action=None, seeds=["/refund"],
+        win_url="/refund", seeds=["/refund"],
+        win_action={"method": "POST", "path": "/refund/buyjacket", "data": {}},
+        success_text="purchased the jacket",
         index_link="<a href=/refund>refund</a>", vuln_id="unvalidated-refund",
         handler=h_refund),
     # ---- enterprise II (real-world surfaces) ----
     Lab(name="bank", difficulty="hard", solved_key="bank", title="Banking: trusted 'from' account",
         objective="Increase your bank balance to at least 100000.",
-        win_url="/bank", win_action=None, seeds=["/bank"],
+        win_url="/bank", seeds=["/bank"],
+        win_action={"method": "POST", "path": "/bank/transfer",
+                    "data": {"from_account": "wiener", "to_account": "wiener", "amount": "1"}},
+        success_text="LARGE-BALANCE ALERT",
         index_link="<a href=/bank>bank</a>", vuln_id="trusted-identity-param",
         handler=h_bank),
     Lab(name="tenant", difficulty="medium", solved_key="tenant", title="SaaS cross-tenant data access",
         objective="Remove the user 'carlos' from the MegaCorp workspace.",
-        win_url="/workspace", win_action=None, seeds=["/workspace"],
+        win_url="/workspace", success_text="removed", seeds=["/workspace"],
+        win_action={"method": "POST", "path": "/workspace/api/remove-user", "data": {"user": "carlos"}},
         index_link="<a href=/workspace>tenant</a>", vuln_id="broken-object-level-auth",
         handler=h_tenant),
     Lab(name="scope", difficulty="hard", solved_key="scope", title="API key scope escalation",
         objective="Delete the user 'carlos' using your read-only API key.",
-        win_url="/devapi", win_action=None, seeds=["/devapi"],
+        win_url="/devapi", success_text="deleted", seeds=["/devapi"],
+        win_action={"method": "POST", "path": "/devapi/users/delete", "data": {"username": "carlos"}},
         index_link="<a href=/devapi>scope</a>", vuln_id="bfla-access-control",
         handler=h_scope),
     Lab(name="billing", difficulty="medium", solved_key="billing", title="Subscription proration abuse",
         objective="Obtain the premium plan starting with only 20 credit.",
-        win_url="/billing", win_action=None, seeds=["/billing"],
+        win_url="/billing", seeds=["/billing"],
+        win_action={"method": "POST", "path": "/billing/buy-premium", "data": {}},
+        success_text="premium purchased",
         index_link="<a href=/billing>billing</a>", vuln_id="domain-specific",
         handler=h_billing),
     Lab(name="loyalty", difficulty="medium", solved_key="loyalty", title="Loyalty points refund abuse",
         objective="Get a cabin upgrade (needs 250 points) starting from 100.",
-        win_url="/loyalty", win_action=None, seeds=["/loyalty"],
+        win_url="/loyalty", seeds=["/loyalty"],
+        win_action={"method": "POST", "path": "/loyalty/upgrade", "data": {}},
+        success_text="cabin upgraded",
         index_link="<a href=/loyalty>loyalty</a>", vuln_id="domain-specific",
         handler=h_loyalty),
     Lab(name="invoice", difficulty="medium", solved_key="invoice", title="AP approval-gate bypass",
         objective="Pay a high-value invoice without manager approval.",
-        win_url="/ap", win_action=None, seeds=["/ap"],
+        win_url="/ap", seeds=["/ap"],
+        win_action={"method": "POST", "path": "/ap/pay", "data": {"invoice_id": "INV-1"}},
+        success_text="PAID WITHOUT APPROVAL",
         index_link="<a href=/ap>invoice</a>", vuln_id="sequence-bypass",
         handler=h_invoice),
     Lab(name="twofa", difficulty="hard", solved_key="twofa", title="2FA bypass via trust-device",
@@ -1328,82 +1393,103 @@ LABS: list[Lab] = [
         handler=h_twofa),
     Lab(name="records", difficulty="medium", solved_key="records", title="Healthcare records BOLA",
         objective="Discharge the patient 'carlos' via the clinic API.",
-        win_url="/clinic", win_action=None, seeds=["/clinic"],
+        win_url="/clinic", success_text="discharged", seeds=["/clinic"],
+        win_action={"method": "POST", "path": "/clinic/api/discharge", "data": {"patient": "carlos"}},
         index_link="<a href=/clinic>records</a>", vuln_id="broken-object-level-auth",
         handler=h_records),
     Lab(name="files", difficulty="medium", solved_key="files", title="Cloud drive permission escalation",
         objective="Delete the 'Q4-Board-Deck' file shared with you as viewer.",
-        win_url="/drive", success_text="deleted", seeds=["/drive"],
+        win_url="/drive", success_text="file deleted", seeds=["/drive"],
         win_action={"method": "POST", "path": "/drive/delete", "data": {"file": "Q4-Board-Deck"}},
         index_link="<a href=/drive>files</a>", vuln_id="mass-assignment",
         handler=h_files),
     Lab(name="deploy", difficulty="hard", solved_key="deploy", title="CI/CD production deploy (BFLA)",
         objective="Deploy a service to the production environment.",
-        win_url="/ci", win_action=None, seeds=["/ci"],
+        win_url="/ci", seeds=["/ci"],
+        win_action={"method": "POST", "path": "/ci/deploy",
+                    "data": {"service": "payments-api", "env": "staging"}},
+        success_text="to PRODUCTION",
         index_link="<a href=/ci>deploy</a>", vuln_id="bfla-access-control",
         handler=h_deploy),
     Lab(name="referral", difficulty="medium", solved_key="referral", title="Self-referral reward abuse",
         objective="Unlock the 50-credit free-shipping reward from 0 credit.",
-        win_url="/refer", win_action=None, seeds=["/refer"],
+        win_url="/refer", seeds=["/refer"],
+        win_action={"method": "POST", "path": "/refer/claim", "data": {}},
+        success_text="free shipping unlocked",
         index_link="<a href=/refer>referral</a>", vuln_id="domain-specific",
         handler=h_referral),
     # ---- enterprise III (GraphQL, legacy auth, ERP, fintech, IAM, ...) ----
     Lab(name="graphql", difficulty="hard", solved_key="graphql", title="GraphQL field-authz over-fetch",
         objective="Delete the user 'carlos' via the GraphQL API.",
-        win_url="/graphql", win_action=None, seeds=["/graphql"],
+        win_url="/graphql", success_text="deleted", seeds=["/graphql"],
+        win_action={"method": "POST", "path": "/graphql",
+                    "data": {"query": 'mutation { deleteUser(name: "carlos") }'}},
         index_link="<a href=/graphql>graphql</a>", vuln_id="broken-object-level-auth",
         handler=h_graphql),
     Lab(name="cookie", difficulty="medium", solved_key="cookie", title="Forgeable identity cookie",
         objective="Remove the user 'carlos' via the admin portal.",
-        win_url="/portal", success_text="removed", seeds=["/portal"],
+        win_url="/portal", success_text="removed carlos", seeds=["/portal"],
         win_action={"method": "POST", "path": "/portal/remove-user", "data": {"username": "carlos"}},
         index_link="<a href=/portal>cookie</a>", vuln_id="trusted-identity-param",
         handler=h_cookie),
     Lab(name="selfapprove", difficulty="hard", solved_key="selfapprove", title="Expense self-approval (SoD)",
         objective="Get a high-value expense (over 1000) approved and paid.",
-        win_url="/erp", win_action=None, seeds=["/erp"],
+        win_url="/erp", seeds=["/erp"],
+        win_action={"method": "POST", "path": "/erp/pay", "data": {"expense_id": "EXP-1"}},
+        success_text="SEGREGATION-OF-DUTIES",
         index_link="<a href=/erp>selfapprove</a>", vuln_id="sequence-bypass",
         handler=h_selfapprove),
     Lab(name="stack", difficulty="medium", solved_key="stack", title="Coupon stacking",
         objective="Obtain the jacket for free.",
-        win_url="/stack", win_action=None, seeds=["/stack"],
+        win_url="/stack", seeds=["/stack"],
+        win_action={"method": "POST", "path": "/stack/checkout", "data": {}},
+        success_text="purchased jacket for free",
         index_link="<a href=/stack>stack</a>", vuln_id="domain-specific",
         handler=h_stack),
     Lab(name="fx", difficulty="hard", solved_key="fx", title="Currency rounding arbitrage",
         objective="Buy the 130-USD jacket starting from only 100 USD.",
-        win_url="/fx", win_action=None, seeds=["/fx"],
+        win_url="/fx", seeds=["/fx"],
+        win_action={"method": "POST", "path": "/fx/buy", "data": {}},
+        success_text="purchased the jacket",
         index_link="<a href=/fx>fx</a>", vuln_id="integer-overflow",
         handler=h_fx),
     Lab(name="iam", difficulty="medium", solved_key="iam", title="IAM group self-add (BFLA)",
         objective="Delete the user 'carlos' in the IAM console.",
-        win_url="/iam", success_text="deleted", seeds=["/iam"],
+        win_url="/iam", success_text="deleted carlos", seeds=["/iam"],
         win_action={"method": "POST", "path": "/iam/user/delete", "data": {"username": "carlos"}},
         index_link="<a href=/iam>iam</a>", vuln_id="bfla-access-control",
         handler=h_iam),
     Lab(name="receipt", difficulty="hard", solved_key="receipt", title="Replayable payment receipt",
         objective="Buy the 500-credit jacket starting from 0 credit.",
-        win_url="/pay", win_action=None, seeds=["/pay"],
+        win_url="/pay", seeds=["/pay"],
+        win_action={"method": "POST", "path": "/pay/buy", "data": {}},
+        success_text="purchased the jacket",
         index_link="<a href=/pay>receipt</a>", vuln_id="coupon-reuse",
         handler=h_receipt),
     Lab(name="batch", difficulty="medium", solved_key="batch", title="Batch API authz bypass",
         objective="Delete the user 'carlos' via the bulk operations API.",
-        win_url="/batch", win_action=None, seeds=["/batch"],
+        win_url="/batch", success_text="deleted carlos", seeds=["/batch"],
+        win_action={"method": "POST", "path": "/batch/run", "data": {"ops": "delete:carlos"}},
         index_link="<a href=/batch>batch</a>", vuln_id="bfla-access-control",
         handler=h_batch),
     Lab(name="license", difficulty="medium", solved_key="license", title="License plan tampering",
         objective="Unlock a premium feature without paying.",
-        win_url="/license", win_action=None, seeds=["/license"],
+        win_url="/license", seeds=["/license"],
+        win_action={"method": "POST", "path": "/license/feature", "data": {}},
+        success_text="premium feature unlocked",
         index_link="<a href=/license>license</a>", vuln_id="mass-assignment",
         handler=h_license),
     Lab(name="headerip", difficulty="hard", solved_key="headerip", title="Forwarded-for network-trust bypass",
         objective="Delete the user 'carlos' from the ops admin panel.",
-        win_url="/adminpanel", success_text="deleted", seeds=["/adminpanel"],
+        win_url="/adminpanel", success_text="deleted carlos", seeds=["/adminpanel"],
         win_action={"method": "POST", "path": "/adminpanel/delete", "data": {"username": "carlos"}},
         index_link="<a href=/adminpanel>headerip</a>", vuln_id="trusted-identity-param",
         handler=h_headerip),
     Lab(name="quota", difficulty="medium", solved_key="quota", title="Usage-metering tamper",
         objective="Generate a premium report after exhausting the free quota.",
-        win_url="/usage", win_action=None, seeds=["/usage"],
+        win_url="/usage", seeds=["/usage"],
+        win_action={"method": "POST", "path": "/usage/generate", "data": {}},
+        success_text="premium report generated",
         index_link="<a href=/usage>quota</a>", vuln_id="client-side-trust",
         handler=h_quota),
 ]

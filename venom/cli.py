@@ -10,7 +10,7 @@ VENOM command-line interface.
   venom web      [--host --port --open]        Web console (UI over the real engine)
 
 Safety: `run` is DRY-RUN by default (no requests are sent). Pass --live to send
-real requests — only allowed within the authorized scope, and the scope guard
+real requests - only allowed within the authorized scope, and the scope guard
 still blocks anything out of scope.
 """
 
@@ -33,7 +33,7 @@ def _cmd_scope(args) -> int:
         print(f"[scope] INVALID: {e}", file=sys.stderr)
         return 2
     print(scope.summary())
-    print("\n[scope] OK — engagement is authorized and within its time window.")
+    print("\n[scope] OK - engagement is authorized and within its time window.")
     return 0
 
 
@@ -101,7 +101,7 @@ def _cmd_agents(args) -> int:
                     )
                     seen[model] = f"OK ({res['model']})"
                 except Exception as e:  # noqa: BLE001
-                    seen[model] = f"FAILED — {e}"
+                    seen[model] = f"FAILED - {e}"
                 print(f"    {model:<34}{seen[model]}")
 
         asyncio.run(ping())
@@ -117,9 +117,9 @@ def _cmd_burp(args) -> int:
 
         info = asyncio.run(burp_status(SETTINGS.burp_mcp_url))
         if info.get("ok"):
-            print(f"  CONNECTED — {info['tool_count']} tool(s): {', '.join(info['tools'])}")
+            print(f"  CONNECTED - {info['tool_count']} tool(s): {', '.join(info['tools'])}")
         else:
-            print(f"  NOT CONNECTED — {info.get('reason')}")
+            print(f"  NOT CONNECTED - {info.get('reason')}")
         return 0
 
     print("Setup (no API key needed):")
@@ -217,7 +217,7 @@ def _cmd_hunt(args) -> int:
     scope = build_hunt_scope(args)
     tf = Path(tempfile.gettempdir()) / f"{scope['engagement_id']}.json"
     tf.write_text(json.dumps(scope, indent=2), encoding="utf-8")
-    print(f"[hunt] target {args.url} — scope {tf}")
+    print(f"[hunt] target {args.url} - scope {tf}")
 
     # Delegate to the engagement runner in autonomous live mode.
     args.scope = str(tf)
@@ -247,7 +247,7 @@ def _cmd_oneshot(args) -> int:
     scope.validate_window()
     router = LLMRouter.from_env(air_gap=scope.air_gap_mode, mode=scope.llm_mode)
     if not router.any_enabled():
-        print("[oneshot] no LLM provider enabled — set a key in .env"); return 2
+        print("[oneshot] no LLM provider enabled - set a key in .env"); return 2
 
     async def go():
         registry = EndpointRegistry()
@@ -256,7 +256,7 @@ def _cmd_oneshot(args) -> int:
             try:
                 auth = await AuthManager(scope, dry_run=False).ensure(scope.identities[0]["name"])
             except Exception as exc:  # noqa: BLE001
-                print(f"[oneshot] login failed ({exc}) — crawling unauthenticated")
+                print(f"[oneshot] login failed ({exc}) - crawling unauthenticated")
         await crawl(scope, registry, seeds=["/"], auth_state=auth,
                     max_pages=args.max_pages, forced_browse=True)
         orch = build_orchestrator(router)
@@ -269,7 +269,7 @@ def _cmd_oneshot(args) -> int:
     findings = asyncio.run(go())
     print(f"\n[oneshot] {len(findings)} confirmed exploit(s)")
     for f in findings:
-        print(f"  {f.test_id} {f.verdict.value} — {f.hypothesis[:90]}")
+        print(f"  {f.test_id} {f.verdict.value} - {f.hypothesis[:90]}")
         code = f.evidence.get("exploit_code", "")
         if args.out and code:
             out = _P(args.out); out.mkdir(parents=True, exist_ok=True)
@@ -281,7 +281,7 @@ def _cmd_oneshot(args) -> int:
 
 
 def _cmd_web(args) -> int:
-    """Launch the VENOM console — a local web UI over the real engine. Launching
+    """Launch the VENOM console - a local web UI over the real engine. Launching
     an engagement from the UI runs in-process against the bundled VulnLab."""
     from .web import serve
 

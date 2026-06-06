@@ -1,14 +1,14 @@
 """
 Flawed-login-state-machine flow ("authentication bypass via flawed state machine").
 
-A multi-step login (POST /login → second step such as /role-selector or an MFA
-prompt → finish) assumes step 1 is always followed by the next step. If the
+A multi-step login (POST /login -> second step such as /role-selector or an MFA
+prompt -> finish) assumes step 1 is always followed by the next step. If the
 session's *default* role before the second step is privileged, completing only
-step 1 and going straight to the admin interface — never visiting the intermediate
-step that would assign the real (lower) role — yields administrative access.
+step 1 and going straight to the admin interface - never visiting the intermediate
+step that would assign the real (lower) role - yields administrative access.
 
-Chain: GET /login (scrape csrf) → POST credentials (step 1 only, do NOT follow into
-the role-selector) → GET /admin directly → (opt-in) delete the objective user and
+Chain: GET /login (scrape csrf) -> POST credentials (step 1 only, do NOT follow into
+the role-selector) -> GET /admin directly -> (opt-in) delete the objective user and
 check the solved state.
 """
 

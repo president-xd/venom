@@ -493,7 +493,9 @@ hr.div { border: none; border-top: 1px solid var(--border); margin: 18px 0; }
 .seg { display: inline-flex; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); overflow: hidden; background: var(--surface); }
 .seg button { padding: 6px 13px; font-size: 12.5px; font-weight: 500; background: none; border: none; color: var(--ink-3); border-right: 1px solid var(--border); transition: all 0.12s; }
 .seg button:last-child { border-right: none; }
-.seg button.on { background: var(--ink); color: #fff; font-weight: 600; }
+/* `color: var(--bg)` (not #fff) so the active segment inverts correctly in BOTH
+   themes: dark text on the light-ink button in dark mode, light text in light mode. */
+.seg button.on { background: var(--ink); color: var(--bg); font-weight: 600; }
 .search-in { display: flex; align-items: center; gap: 8px; padding: 6px 11px; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); background: var(--surface); flex: 1; max-width: 320px; }
 .search-in input { border: none; outline: none; background: none; font-size: 13px; width: 100%; color: var(--ink); }
 .search-in svg { width: 15px; height: 15px; color: var(--ink-3); flex-shrink: 0; }
@@ -625,3 +627,110 @@ hr.div { border: none; border-top: 1px solid var(--border); margin: 18px 0; }
 [data-density="compact"] .stat { padding: 12px 14px; }
 [data-density="compact"] .pstage .body { padding-bottom: 12px; }
 [data-density="compact"] .console { height: 500px; }
+
+/* ============================================================
+   LOGIN
+   ============================================================ */
+.login-wrap { height: 100%; display: grid; place-items: center; background: var(--bg); padding: 24px; }
+.login-card { width: 100%; max-width: 380px; padding: 30px 30px 26px; }
+.login-brand { display: flex; align-items: center; gap: 12px; }
+.login-word { font-weight: 700; letter-spacing: 0.14em; font-size: 17px; color: var(--ink); }
+.login-tag { font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.04em; color: var(--ink-3); margin-top: 2px; }
+.login-lab { display: block; font-size: 12px; font-weight: 600; color: var(--ink-2); margin: 12px 0 5px; }
+.login-input {
+  width: 100%; padding: 9px 11px; font-size: 13.5px; border-radius: var(--radius-sm);
+  border: 1px solid var(--border-strong); background: var(--surface); color: var(--ink);
+}
+.login-input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.login-btn { width: 100%; justify-content: center; margin-top: 18px; padding: 10px; }
+.login-err { margin-top: 12px; font-size: 12.5px; color: var(--sev-crit); background: var(--crit-soft);
+  border: 1px solid var(--sev-crit); border-radius: var(--radius-sm); padding: 7px 10px; }
+
+.sb-logout { background: none; border: none; color: oklch(0.62 0.01 80); padding: 6px; border-radius: 6px;
+  display: grid; place-items: center; flex-shrink: 0; }
+.sb-logout:hover { background: oklch(0.30 0.012 75); color: oklch(0.95 0.005 80); }
+
+/* ============================================================
+   DARK MODE — neutral-variable overrides only; everything else
+   already reads from the variables, so the whole UI re-themes.
+   Follows the OS preference, and an explicit [data-theme] wins.
+   ============================================================ */
+:root[data-theme="dark"],
+:root[data-theme="dark"] body { color-scheme: dark; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) { color-scheme: dark; }
+}
+
+/* the dark palette, applied for OS-dark (unless forced light) OR forced dark */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg:            oklch(0.205 0.006 75);
+    --surface:       oklch(0.245 0.006 75);
+    --surface-2:     oklch(0.225 0.006 75);
+    --surface-3:     oklch(0.285 0.007 75);
+    --border:        oklch(0.33 0.008 75);
+    --border-strong: oklch(0.43 0.010 75);
+    --ink:   oklch(0.94 0.006 80);
+    --ink-2: oklch(0.79 0.008 80);
+    --ink-3: oklch(0.64 0.008 80);
+    --ink-4: oklch(0.52 0.008 80);
+    --accent-soft:   oklch(0.32 0.055 60);
+    --accent-line:   oklch(0.42 0.07 58);
+    --info-soft:     oklch(0.30 0.045 250);
+    --crit-soft:     oklch(0.30 0.06 22);
+    --high-soft:     oklch(0.31 0.06 45);
+    --med-soft:      oklch(0.32 0.06 85);
+    --low-soft:      oklch(0.30 0.045 240);
+    --ok-soft:       oklch(0.30 0.05 152);
+    --shadow-sm: 0 1px 2px oklch(0 0 0 / 0.30), 0 1px 1px oklch(0 0 0 / 0.24);
+    --shadow:    0 1px 3px oklch(0 0 0 / 0.40), 0 4px 12px oklch(0 0 0 / 0.32);
+    --shadow-lg: 0 12px 32px oklch(0 0 0 / 0.50), 0 2px 8px oklch(0 0 0 / 0.34);
+  }
+}
+:root[data-theme="dark"] {
+  --bg:            oklch(0.205 0.006 75);
+  --surface:       oklch(0.245 0.006 75);
+  --surface-2:     oklch(0.225 0.006 75);
+  --surface-3:     oklch(0.285 0.007 75);
+  --border:        oklch(0.33 0.008 75);
+  --border-strong: oklch(0.43 0.010 75);
+  --ink:   oklch(0.94 0.006 80);
+  --ink-2: oklch(0.79 0.008 80);
+  --ink-3: oklch(0.64 0.008 80);
+  --ink-4: oklch(0.52 0.008 80);
+  --accent-soft:   oklch(0.32 0.055 60);
+  --accent-line:   oklch(0.42 0.07 58);
+  --info-soft:     oklch(0.30 0.045 250);
+  --crit-soft:     oklch(0.30 0.06 22);
+  --high-soft:     oklch(0.31 0.06 45);
+  --med-soft:      oklch(0.32 0.06 85);
+  --low-soft:      oklch(0.30 0.045 240);
+  --ok-soft:       oklch(0.30 0.05 152);
+  --shadow-sm: 0 1px 2px oklch(0 0 0 / 0.30), 0 1px 1px oklch(0 0 0 / 0.24);
+  --shadow:    0 1px 3px oklch(0 0 0 / 0.40), 0 4px 12px oklch(0 0 0 / 0.32);
+  --shadow-lg: 0 12px 32px oklch(0 0 0 / 0.50), 0 2px 8px oklch(0 0 0 / 0.34);
+}
+
+/* ============================================================
+   RESPONSIVE — below 760px the (otherwise off-screen) sidebar
+   becomes a horizontal, scrollable nav strip above the content,
+   so the console is usable on a narrow viewport. Desktop is
+   untouched (this only applies under the breakpoint).
+   ============================================================ */
+@media (max-width: 760px) {
+  .app { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
+  .sidebar {
+    flex-direction: row; align-items: center;
+    border-right: none; border-bottom: 1px solid oklch(0.30 0.012 75);
+    overflow-x: auto; overflow-y: hidden;
+  }
+  .sb-brand { border-bottom: none; padding: 10px 12px; flex-shrink: 0; }
+  .sb-word small, .sb-section, .sb-foot { display: none; }
+  .sb-nav { flex-direction: row; padding: 8px; gap: 4px; flex: 1; overflow-x: auto; overflow-y: hidden; }
+  .sb-item { width: auto; white-space: nowrap; flex-shrink: 0; }
+  .sb-item .badge-count { margin-left: 6px; }
+  .page { padding: 18px 16px 48px; }
+  .page-wide { max-width: 100%; }
+  .topbar { padding: 0 14px; }
+  .tb-target { display: none; }
+}

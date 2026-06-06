@@ -6,7 +6,7 @@ assumption that model rests on:
 sequence violations, BOLA/IDOR, race conditions, parameter/type confusion,
 mass-assignment privilege escalation, and economic-flow abuse.
 
-> ⚠️ **Authorized engagements only.** VENOM loads an authorization *scope object*
+> S**Authorized engagements only.** VENOM loads an authorization *scope object*
 > before any action and refuses to send a single request outside it. There is no
 > bypass flag. Testing any target without explicit written authorization is
 > illegal and unsupported.

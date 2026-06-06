@@ -7,8 +7,8 @@ Supported providers:
   - NVIDIA NIM               -> cloud/on-prem GPU, enterprise deployments
   - Ollama                   -> fully local, air-gapped engagements
 
-(An Anthropic adapter exists for completeness but is unused in this deployment —
-there is no Anthropic key and it is not in the routing/fallback tables.)
+(Anthropic is intentionally NOT a provider here - no key, no routing entry, no
+adapter. Claude models remain reachable via OpenRouter if an operator configures it.)
 
 Usage:
     from venom.llm import LLMRouter, TaskType
@@ -38,7 +38,7 @@ logger = logging.getLogger("venom.llm")
 
 
 # ---------------------------------------------------------------------------
-# Task taxonomy — drives provider routing decisions
+# Task taxonomy - drives provider routing decisions
 # ---------------------------------------------------------------------------
 
 class TaskType(str, Enum):
@@ -52,7 +52,6 @@ class TaskType(str, Enum):
 
 
 class Provider(str, Enum):
-    ANTHROPIC  = "anthropic"
     DEEPSEEK   = "deepseek"
     OPENROUTER = "openrouter"
     NVIDIA_NIM = "nvidia_nim"
@@ -80,7 +79,7 @@ class ProviderConfig:
     _request_times: list[float] = field(default_factory=list, repr=False)
 
     async def throttle(self) -> None:
-        """Proactive sliding-window throttle — SLEEPS until a slot is free so we
+        """Proactive sliding-window throttle - SLEEPS until a slot is free so we
         stay under the provider's RPM and avoid 429s (vital when one provider has
         no working fallback)."""
         import asyncio
@@ -99,23 +98,14 @@ class ProviderConfig:
 # Default provider configurations
 # ---------------------------------------------------------------------------
 
-ANTHROPIC_DEFAULT = ProviderConfig(
-    provider=Provider.ANTHROPIC,
-    api_key=os.getenv("ANTHROPIC_API_KEY"),
-    base_url="https://api.anthropic.com/v1/messages",
-    model="claude-opus-4-8",  # Strongest for complex reasoning
-    max_tokens=8192,
-    temperature=0.2,
-    extra_headers={"anthropic-version": "2023-06-01"},
-    requests_per_minute=50,
-)
-
 DEEPSEEK_DEFAULT = ProviderConfig(
     provider=Provider.DEEPSEEK,
     api_key=os.getenv("DEEPSEEK_API_KEY"),
-    # OpenAI-compatible Chat Completions API. `deepseek-chat` is V3 (fast, strong
-    # codegen); `deepseek-reasoner` is R1 (slower, returns reasoning_content too —
-    # handled by _extract_message_text). Base URL accepts an optional /v1.
+    # OpenAI-compatible Chat Completions API. `deepseek-chat` is the fast general
+    # model; the heavier reasoning model (returns reasoning_content too - handled by
+    # _extract_message_text) is `deepseek-v4-pro`. `deepseek-reasoner` is a legacy
+    # alias. Exact availability is account/date-dependent (query /models to confirm).
+    # Base URL accepts an optional /v1.
     base_url=os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com/chat/completions"),
     model=os.getenv("DEEPSEEK_MODEL", "deepseek-chat"),
     max_tokens=4096,
@@ -128,7 +118,7 @@ OPENROUTER_DEFAULT = ProviderConfig(
     provider=Provider.OPENROUTER,
     api_key=os.getenv("OPENROUTER_API_KEY"),
     base_url="https://openrouter.ai/api/v1/chat/completions",
-    # The operator's available OpenRouter model — used as the NVIDIA fallback.
+    # The operator's available OpenRouter model - used as the NVIDIA fallback.
     model=os.getenv("OPENROUTER_MODEL", "qwen/qwen3-coder:free"),
     max_tokens=4096,
     temperature=0.2,
@@ -146,11 +136,12 @@ NVIDIA_NIM_DEFAULT = ProviderConfig(
         "NVIDIA_NIM_BASE_URL", "https://integrate.api.nvidia.com/v1/chat/completions"
     ),
     # Base model for the whole agent system (DeepSeek). Per-agent models override
-    # this at call time — see venom.agents.roles.
+    # this at call time - see venom.agents.roles. Verified present in the live NVIDIA
+    # catalog (deepseek-ai/deepseek-r1 is NOT served there -> 404 on chat/completions).
     model=os.getenv("VENOM_BASE_MODEL", "deepseek-ai/deepseek-v4-pro"),
     max_tokens=8192,
     temperature=0.2,
-    # Conservative for NVIDIA free tier — the throttle sleeps to stay under this,
+    # Conservative for NVIDIA free tier - the throttle sleeps to stay under this,
     # avoiding 429s (override via env if you have a higher quota).
     requests_per_minute=int(os.getenv("NVIDIA_RPM", "20")),
 )
@@ -219,7 +210,7 @@ OLLAMA_MODEL_OPTIONS: list[str] = [
 
 # NVIDIA NIM model catalog (alias -> full model id). These are only built-in
 # DEFAULTS; users register/override models from the environment via
-# VENOM_NVIDIA_MODELS (comma-separated `alias=full/model-id` pairs) — no code
+# VENOM_NVIDIA_MODELS (comma-separated `alias=full/model-id` pairs) - no code
 # edit required. Aliases may be used as shorthand in VENOM_MODEL_<ROLE>.
 _DEFAULT_NVIDIA_MODELS: dict[str, str] = {
     "deepseek-v4-pro":  "deepseek-ai/deepseek-v4-pro",   # base / orchestrator / reporter
@@ -227,7 +218,6 @@ _DEFAULT_NVIDIA_MODELS: dict[str, str] = {
     "glm-5.1":          "z-ai/glm-5.1",                  # research agent
     "qwen3.5":          "qwen/qwen3.5-397b-a17b",        # codegen / summarizer subagent
     "llama3.1-70b":     "meta/llama-3.1-70b-instruct",
-    "llama3.1-405b":    "meta/llama-3.1-405b-instruct",
     "nemotron-340b":    "nvidia/nemotron-4-340b-instruct",
 }
 
@@ -272,7 +262,8 @@ class LLMRouter:
         self.routing = AIR_GAP_ROUTING if air_gap else routing
         self.air_gap = air_gap
         # Every task type must have a path to a working provider. No Anthropic here;
-        # NVIDIA NIM leads (the reliable keyed provider), then OpenRouter, then local Ollama.
+        # DeepSeek (the paid, OpenAI-compatible primary) leads, then NVIDIA NIM and
+        # OpenRouter as cloud fallbacks, then local Ollama for the air-gap path.
         self.fallback_chain = fallback_chain or [
             Provider.DEEPSEEK,
             Provider.NVIDIA_NIM,
@@ -299,7 +290,7 @@ class LLMRouter:
             "air_gap": AIR_GAP_ROUTING,
         }.get(mode, DEFAULT_ROUTING)
 
-        # Anthropic intentionally excluded — not available in this deployment.
+        # Anthropic intentionally excluded - not available in this deployment.
         providers = {
             Provider.DEEPSEEK: DEEPSEEK_DEFAULT,
             Provider.OPENROUTER: OPENROUTER_DEFAULT,
@@ -317,7 +308,7 @@ class LLMRouter:
                 cfg.api_key = os.getenv(env_key[p]) or cfg.api_key
             if p != Provider.OLLAMA and not cfg.api_key:
                 cfg.enabled = False
-                logger.debug("[%s] disabled — no API key in environment", p)
+                logger.debug("[%s] disabled - no API key in environment", p)
             elif p != Provider.OLLAMA:
                 cfg.enabled = True
 
@@ -350,7 +341,7 @@ class LLMRouter:
             target = Provider.OLLAMA
             attempt_order = [Provider.OLLAMA]
         else:
-            target = override_provider or self.routing.get(task, Provider.NVIDIA_NIM)
+            target = override_provider or self.routing.get(task, Provider.DEEPSEEK)
             attempt_order = [target] + [p for p in self.fallback_chain if p != target]
 
         # --- cache: identical calls (common in agent loops) skip the provider ---
@@ -411,21 +402,19 @@ class LLMRouter:
                 if self.cache is not None and ckey is not None:
                     self.cache.put(ckey, result)
                 logger.info(
-                    "[%s] %s completed — %s->%s tokens (%dms)",
+                    "[%s] %s completed - %s->%s tokens (%dms)",
                     provider, task,
                     result.get("input_tokens", "?"), result.get("output_tokens", "?"), latency_ms,
                 )
                 return result
-            except Exception as exc:  # noqa: BLE001 — provider-agnostic fallback
+            except Exception as exc:  # noqa: BLE001 - provider-agnostic fallback
                 last_error = exc
-                logger.warning("[%s] %s failed: %s — trying next provider", provider, task, exc)
+                logger.warning("[%s] %s failed: %s - trying next provider", provider, task, exc)
                 continue
 
         raise RuntimeError(f"All providers failed for task {task}. Last error: {last_error}")
 
     async def _dispatch(self, cfg, task, messages, system, **kwargs) -> dict[str, Any]:
-        if cfg.provider == Provider.ANTHROPIC:
-            return await self._call_anthropic(cfg, messages, system, **kwargs)
         if cfg.provider == Provider.DEEPSEEK:
             return await self._call_deepseek(cfg, messages, system, **kwargs)
         if cfg.provider == Provider.OPENROUTER:
@@ -435,29 +424,6 @@ class LLMRouter:
         if cfg.provider == Provider.OLLAMA:
             return await self._call_ollama(cfg, messages, system, **kwargs)
         raise ValueError(f"Unknown provider: {cfg.provider}")
-
-    # ------------------------------------------------------------------ Anthropic
-    async def _call_anthropic(self, cfg, messages, system, **kwargs) -> dict[str, Any]:
-        headers = {"x-api-key": cfg.api_key, "Content-Type": "application/json", **cfg.extra_headers}
-        payload = {
-            "model": kwargs.get("model", cfg.model),
-            "max_tokens": kwargs.get("max_tokens", cfg.max_tokens),
-            "temperature": kwargs.get("temperature", cfg.temperature),
-            "messages": messages,
-        }
-        if system:
-            payload["system"] = system
-        async with httpx.AsyncClient(timeout=cfg.timeout) as client:
-            resp = await client.post(cfg.base_url, headers=headers, json=payload)
-            resp.raise_for_status()
-            data = resp.json()
-        return {
-            "content": data["content"][0]["text"],
-            "model": data.get("model", cfg.model),
-            "input_tokens": data.get("usage", {}).get("input_tokens", 0),
-            "output_tokens": data.get("usage", {}).get("output_tokens", 0),
-            "raw": data,
-        }
 
     # ------------------------------------------------------------------ DeepSeek
     async def _call_deepseek(self, cfg, messages, system, **kwargs) -> dict[str, Any]:
@@ -549,7 +515,7 @@ class LLMRouter:
                 "temperature": kwargs.get("temperature", cfg.temperature),
                 "num_predict": kwargs.get("max_tokens", cfg.max_tokens),
                 # Ollama defaults to a 2048-token window, which silently TRUNCATES
-                # the recon brief — the model then can't see the endpoints/snippets
+                # the recon brief - the model then can't see the endpoints/snippets
                 # and invents paths. Give it room to actually read the prompt.
                 "num_ctx": int(os.getenv("OLLAMA_NUM_CTX", "8192")),
             },
@@ -638,7 +604,7 @@ def _first_json_object(text: str) -> str | None:
 
 def _loads_lenient(content: str) -> dict[str, Any]:
     """Parse a JSON object from an LLM response that may include code fences,
-    surrounding prose, or trailing commas — common, non-fatal model quirks."""
+    surrounding prose, or trailing commas - common, non-fatal model quirks."""
     raw = (content or "").strip()
     if raw.startswith("```"):
         raw = raw.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
@@ -659,18 +625,23 @@ def _loads_lenient(content: str) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 async def test_all_providers(router: LLMRouter) -> None:
+    """Ping each configured provider HONESTLY: dispatch DIRECTLY to that provider
+    (no fallback chain), so a provider that is actually down is reported FAILED
+    rather than silently masked by another provider answering in its place."""
     ping = [{"role": "user", "content": "Reply with the single word: OK"}]
     for provider, cfg in router.providers.items():
         if not cfg.enabled:
             print(f"  [{provider.value}] DISABLED (no API key)")
             continue
         try:
-            res = await router.complete(
-                TaskType.TEST_SUMMARIZATION, ping, override_provider=provider, max_tokens=10
-            )
-            print(f"  [{provider.value}] OK — model: {res['model']}")
+            # Direct dispatch - bypasses router.complete()'s fallback so the result
+            # genuinely came from THIS provider (the old code let a fallback answer
+            # and then mislabelled it as this provider being 'OK').
+            await cfg.throttle()
+            res = await router._dispatch(cfg, TaskType.TEST_SUMMARIZATION, ping, "", max_tokens=10)
+            print(f"  [{provider.value}] OK - model: {res.get('model', cfg.model)}")
         except Exception as e:  # noqa: BLE001
-            print(f"  [{provider.value}] FAILED — {e}")
+            print(f"  [{provider.value}] FAILED - {e}")
 
 
 if __name__ == "__main__":

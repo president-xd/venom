@@ -3,8 +3,8 @@ Business-logic vulnerability knowledge base.
 
 Curated from OWASP WSTG §4.10 (Business Logic Testing) and PortSwigger's
 "Examples of business logic vulnerabilities". This is used as *priors* for the
-reasoning agent — not as rigid playbooks. Each entry tells the agent what to look
-for (signals), how to probe cheaply, and the shape of the exploit — so it can
+reasoning agent - not as rigid playbooks. Each entry tells the agent what to look
+for (signals), how to probe cheaply, and the shape of the exploit - so it can
 reason about a target it has never seen rather than only matching coded patterns.
 
 Sources:
@@ -54,7 +54,7 @@ BUSINESS_LOGIC_KB: list[dict] = [
     {
         "id": "sequence-bypass",
         "name": "Users won't always follow the intended sequence",
-        "signals": ["multi-step flow (cart→checkout, register→verify→use, 2FA)",
+        "signals": ["multi-step flow (cart->checkout, register->verify->use, 2FA)",
                     "state-changing endpoints reachable directly",
                     "a confirmation/success endpoint gated only by a query flag "
                     "(e.g. order-confirmation?order-confirmed=true)"],
@@ -92,7 +92,7 @@ BUSINESS_LOGIC_KB: list[dict] = [
                     "per-user resources; sequential or guessable identifiers"],
         "probe": "Swap your object id/username for another user's (try id=1, id=administrator) "
                  "and request it; read the FULL response body for fields you shouldn't see.",
-        "exploit": "Request another user's object (e.g. GET /api/account?id=1 — pass it via "
+        "exploit": "Request another user's object (e.g. GET /api/account?id=1 - pass it via "
                    "params={'id':'1'}, NOT data). Their response often leaks a secret "
                    "(api_key, token, reset code): extract() it from the response text and reuse it "
                    "in the privileged action (header or body) to act as them.",
@@ -128,7 +128,7 @@ BUSINESS_LOGIC_KB: list[dict] = [
         "name": "Missing rate limit / lockout on a short secret (brute force)",
         "signals": ["a short secret gates an action: 4-digit PIN, OTP, 2FA code, voucher",
                     "no lockout / no attempt counter mentioned"],
-        "probe": "Submit a couple of wrong values — if there is no lockout, the field is brute-able.",
+        "probe": "Submit a couple of wrong values - if there is no lockout, the field is brute-able.",
         "exploit": "Loop over the full keyspace (e.g. for n in range(10000): pin=str(n).zfill(4)) "
                    "calling the verify endpoint until the response indicates success, then proceed "
                    "to the gated privileged action in the SAME session.",
@@ -139,7 +139,7 @@ BUSINESS_LOGIC_KB: list[dict] = [
         "name": "Integer overflow / wraparound on a total or balance",
         "signals": ["a total computed as price*quantity (or sum) with no upper bound",
                     "the server echoes the computed total; large inputs accepted"],
-        "probe": "Send a large quantity and read the echoed total — if it goes negative or tiny, "
+        "probe": "Send a large quantity and read the echoed total - if it goes negative or tiny, "
                  "the total wraps a fixed-width integer.",
         "exploit": "Find a quantity that wraps the total into an affordable/zero/negative value: use "
                    "the pre-imported find_overflow_qty(price) (searches qty where price*qty wraps a "
@@ -159,7 +159,7 @@ BUSINESS_LOGIC_KB: list[dict] = [
         "name": "Mass assignment / BOPLA",
         "signals": ["create/update endpoints", "objects with role/tier/balance fields"],
         "probe": "Add undocumented privileged fields (role, is_admin, tier, balance) to the body.",
-        "exploit": "Server binds the extra fields → self-promotion or balance tampering.",
+        "exploit": "Server binds the extra fields -> self-promotion or balance tampering.",
         "refs": ["OWASP API3:2023"],
     },
     {
@@ -186,7 +186,7 @@ BUSINESS_LOGIC_KB: list[dict] = [
                     "validator accepts RFC 2047 encoded-words in the email"],
         "probe": "Keep the literal domain @company (validator passes) but put an encoded-word "
                  "local part the MAILER decodes+re-parses; check if mail reaches your inbox.",
-        "exploit": "UTF-7 atom split: =?utf-7?q?you&AEA-<your-inbox>&ACA-?=@company — validator "
+        "exploit": "UTF-7 atom split: =?utf-7?q?you&AEA-<your-inbox>&ACA-?=@company - validator "
                    "reads @company, mailer decodes '@'(&AEA-)+space(&ACA-) and delivers to your "
                    "inbox, so you register a privileged @company account you actually control.",
         "refs": ["PortSwigger: email parser discrepancies", "Splitting the email atom (Gareth Heyes)"],
@@ -203,12 +203,12 @@ BUSINESS_LOGIC_KB: list[dict] = [
         "exploit": "Pad the local part to (limit - len('@'+priv_domain)) chars, then append "
                    "'@<priv_domain>.<your-inbox-domain>'. The mailer uses the full address "
                    "(confirmation arrives in your inbox); the app stores the truncated value and "
-                   "treats you as belonging to the privileged domain → admin access.",
+                   "treats you as belonging to the privileged domain -> admin access.",
         "refs": ["PortSwigger: Inconsistent handling of exceptional input", "WSTG-BUSL-03"],
     },
     {
         "id": "login-state-machine",
-        "name": "Flawed login state machine (skip a step → privileged default)",
+        "name": "Flawed login state machine (skip a step -> privileged default)",
         "signals": ["multi-step login (POST /login redirects to a second step like "
                     "/role-selector, /mfa, /select-role)",
                     "a privileged page reachable right after step 1"],
@@ -245,7 +245,7 @@ def _tokens(text: str) -> set[str]:
 
 
 def rank_kb(surface: str, top: int = 6) -> list[dict]:
-    """Rank KB priors by overlap with the observed surface — so the prompt is
+    """Rank KB priors by overlap with the observed surface - so the prompt is
     STEERED toward what the target actually exposes instead of dumping all classes
     (which makes weak models anchor on the wrong one)."""
     q = _tokens(surface)

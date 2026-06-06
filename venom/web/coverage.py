@@ -5,10 +5,10 @@ The web console targets the bundled VulnLab, which serves ALL labs on one surfac
 with SHARED state. A single engagement against that combined surface can only
 confirm the most generic flaw (e.g. forced-browse) because each lab's win-oracle
 expects that lab in isolation. This module hunts each lab as a DISCRETE, ISOLATED
-target — fresh state, the lab's own objective + win-oracle — using the SAME agent
+target - fresh state, the lab's own objective + win-oracle - using the SAME agent
 one-shot synthesizer the real engine uses. That is how the demo surfaces the MANY
 vulnerabilities the engine is capable of, each proven by the differential oracle
-(forbidden at baseline → succeeds after the exploit) or the lab's success marker.
+(forbidden at baseline -> succeeds after the exploit) or the lab's success marker.
 
 This is the VulnLab DEMO path (it legitimately uses the bundled labs' ground
 truth, exactly like venom/flows and the eval). The general engine in
@@ -74,13 +74,15 @@ async def _hunt_lab(lab, scope_dict: dict, per_lab_calls: int, sem: asyncio.Sema
 
         router = LLMRouter.from_env()
         synth = make_oneshot_synthesizer(build_orchestrator(router).agent(AgentRole.CODEGEN))
+        # Real-world oracle ONLY: the lab's differential win_action + the realistic
+        # state marker it genuinely emits. No 'is-solved' banner - the console proves
+        # the engine the same way it must perform against a real target.
         obj = Objective(description=lab.objective, win_action=lab.win_action,
-                        win_url=lab.win_url, success_text=lab.success_text or "",
-                        win_signals=("is-solved",))
+                        win_url=lab.win_url, success_text=lab.success_text or "")
         try:
             found = await oneshot_hunt(scope, reg, synth, objective=obj,
                                        transport=transport, max_llm_calls=per_lab_calls)
-        except Exception as exc:  # noqa: BLE001 — one lab must never abort coverage
+        except Exception as exc:  # noqa: BLE001 - one lab must never abort coverage
             logger.warning("coverage lab %s errored: %s", lab.name, exc)
             found = []
         # Re-label the generic ONE-001 case with this lab's identity for the report.

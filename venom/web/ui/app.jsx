@@ -1,5 +1,5 @@
 /* ============================================================
-   VENOM — root app: routing + state (wired to the real backend)
+   VENOM - root app: routing + state (wired to the real backend)
    ============================================================ */
 
 const ACCENTS = [
@@ -12,11 +12,71 @@ const ACCENTS = [
 const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
   "accent": "amber",
   "density": "comfortable",
-  "runSpeed": 2
+  "runSpeed": 2,
+  "theme": "auto"
 }/*EDITMODE-END*/;
+
+// Graceful degradation: a render error in ONE screen shows a message instead of a
+// blank app. Keyed by route in <App/> so navigating away clears a one-off error.
+class ErrorBoundary extends React.Component {
+  constructor(props) { super(props); this.state = { err: null }; }
+  static getDerivedStateFromError(err) { return { err }; }
+  componentDidCatch(err, info) { try { console.error("UI render error:", err, info); } catch (_) {} }
+  render() {
+    if (this.state.err) {
+      return <Placeholder icon="alert" title="This view hit a render error"
+        note={String((this.state.err && this.state.err.message) || this.state.err)} />;
+    }
+    return this.props.children;
+  }
+}
+
+// Login gate — shown until /api/me confirms a session. Each operator then sees
+// only their own engagements.
+function LoginScreen({ onLogin }) {
+  const [u, setU] = React.useState("");
+  const [p, setP] = React.useState("");
+  const [err, setErr] = React.useState("");
+  const [busy, setBusy] = React.useState(false);
+  const submit = async (e) => {
+    e.preventDefault();
+    setBusy(true); setErr("");
+    const msg = await onLogin(u, p);
+    setBusy(false);
+    if (msg) setErr(msg);
+  };
+  return (
+    <div className="login-wrap">
+      <form className="login-card card" onSubmit={submit}>
+        <div className="login-brand">
+          <div className="sb-mark"><Ic name="bug" size={17} /></div>
+          <div>
+            <div className="login-word">VENOM</div>
+            <div className="login-tag">business-logic pentest console</div>
+          </div>
+        </div>
+        <h1 className="h2" style={{ margin: "18px 0 4px" }}>Sign in</h1>
+        <p className="muted" style={{ fontSize: 12.5, marginTop: 0, marginBottom: 16 }}>
+          Authorized operators only. Each operator's engagements are private to their account.
+        </p>
+        <label className="login-lab">Username</label>
+        <input className="login-input" value={u} autoFocus autoComplete="username"
+          onChange={(e) => setU(e.target.value)} placeholder="operator" />
+        <label className="login-lab">Password</label>
+        <input className="login-input" type="password" value={p} autoComplete="current-password"
+          onChange={(e) => setP(e.target.value)} placeholder="password" />
+        {err && <div className="login-err">{err}</div>}
+        <button className="btn btn-primary login-btn" type="submit" disabled={busy || !u || !p}>
+          {busy ? "Signing in..." : "Sign in"}
+        </button>
+      </form>
+    </div>
+  );
+}
 
 function App() {
   const [t, setTweak] = useTweaks(TWEAK_DEFAULTS);
+  const [me, setMe] = React.useState(undefined);   // undefined=checking, null=anon, {..}=user
   const [route, setRoute] = React.useState("dashboard");
   const [findingId, setFindingId] = React.useState(null);
   const [runFinished, setRunFinished] = React.useState(false);
@@ -26,12 +86,34 @@ function App() {
   const [status, setStatus] = React.useState(window.VENOM_STATUS || null);
   const [, force] = React.useReducer((x) => x + 1, 0);
 
-  // boot: overlay real data (vuln classes, engagements, status) onto the seed
+  // boot: confirm the session first; only then overlay real data onto the seed.
   React.useEffect(() => {
-    if (window.API) window.API.boot().then(() => { setStatus(window.VENOM_STATUS); force(); });
+    if (!window.API) { setMe(null); return; }
+    window.API.me().then((d) => {
+      if (d && d.authenticated) {
+        setMe(d.user);
+        window.API.boot().then(() => { setStatus(window.VENOM_STATUS); force(); });
+      } else {
+        setMe(null);
+      }
+    }).catch(() => setMe(null));
   }, []);
 
-  // keep the engagement list LIVE — poll so a running engagement shows the moment
+  const handleLogin = async (username, password) => {
+    const r = await window.API.login(username, password);
+    if (r && r.ok && r.user) {
+      setMe(r.user);
+      try { await window.API.boot(); setStatus(window.VENOM_STATUS); force(); } catch (e) {}
+      return null;                       // success
+    }
+    return (r && r.error) || "Login failed";
+  };
+  const handleLogout = async () => {
+    try { await window.API.logout(); } catch (e) {}
+    setMe(null); setRunId(null); setRoute("dashboard");
+  };
+
+  // keep the engagement list LIVE - poll so a running engagement shows the moment
   // it is launched and a finished one updates without a manual page reload.
   React.useEffect(() => {
     const tick = () => {
@@ -61,15 +143,32 @@ function App() {
   React.useEffect(() => {
     document.documentElement.setAttribute("data-density", t.density);
   }, [t.density]);
-
-  // pull the real findings once a live run completes
+  // Theme: "auto" follows the OS (CSS @media), "light"/"dark" force it.
   React.useEffect(() => {
-    if (runId && runFinished && window.API) {
-      window.API.runFindings(runId).then((d) => { setLiveFindings(d.findings || []); setLiveMeta(d.meta || null); });
-    }
-  }, [runId, runFinished]);
+    const root = document.documentElement;
+    if (t.theme === "light" || t.theme === "dark") root.setAttribute("data-theme", t.theme);
+    else root.removeAttribute("data-theme");
+  }, [t.theme]);
 
-  const findings = (runId && liveFindings) ? liveFindings : window.VENOM.FINDINGS;
+  // Pull the real findings for a finished run. Guarded on `liveFindings === null`
+  // and with it in the deps, so the fetch is idempotent AND self-healing: any render
+  // where a finished run still has no findings re-triggers it (covers a missed initial
+  // fire), and once an array is set the guard stops it - never a perpetual "Loading".
+  React.useEffect(() => {
+    if (runId && runFinished && liveFindings === null && window.API) {
+      let cancelled = false;
+      window.API.runFindings(runId)
+        .then((d) => { if (!cancelled) { setLiveFindings((d && d.findings) || []); setLiveMeta((d && d.meta) || null); } })
+        .catch(() => { if (!cancelled) setLiveFindings([]); });   // never strand the UI
+      return () => { cancelled = true; };
+    }
+  }, [runId, runFinished, liveFindings]);
+
+  // For a real run we use ONLY that run's findings (never leak the demo seed), and
+  // `findings` is ALWAYS an array so list/detail/report can't crash into a blank app.
+  // `findingsReady` is false while a finished run's findings are still being fetched.
+  const findingsReady = !runId || Array.isArray(liveFindings);
+  const findings = runId ? (Array.isArray(liveFindings) ? liveFindings : []) : (window.VENOM.FINDINGS || []);
   const findingCount = findings.length;
   const engLabel = runId ? "VulnLab" : "Engagement";
   const go = (r) => { setRoute(r); document.querySelector(".content")?.scrollTo(0, 0); };
@@ -114,9 +213,14 @@ function App() {
     }
   };
   const showTarget = !!runId && ["run", "findings", "finding", "report"].includes(route);
-  const target = "localhost:8000 · VulnLab";
-  const topRight = (runId && (route === "run" || route === "findings" || route === "report")) ? (
-    <Pill kind={runFinished || route !== "run" ? "done" : "live"}>{runFinished || route !== "run" ? "engagement complete" : "live"}</Pill>
+  // Reflect the REAL target of the selected run (never hardcode the demo host - an
+  // external engagement must show the host the operator actually entered).
+  const curEng = (window.VENOM.ENGAGEMENTS || []).find((e) => e.id === runId);
+  const target = curEng ? `${curEng.url || "target"} · ${curEng.name || "engagement"}` : "engagement";
+  // The status pill reflects the ACTUAL run state (runFinished), not the route - a
+  // live run viewed from Findings/Report must still read "live", not "complete".
+  const topRight = (runId && ["run", "findings", "report"].includes(route)) ? (
+    <Pill kind={runFinished ? "done" : "live"}>{runFinished ? "engagement complete" : "live"}</Pill>
   ) : null;
 
   let body;
@@ -132,29 +236,42 @@ function App() {
     case "findings":
       body = noRun
         ? <Placeholder icon="bug" title="No findings yet" note="Launch an engagement to produce confirmed, evidence-backed findings." />
-        : <FindingsList findings={findings} openFinding={openFinding} runId={runId} />; break;
+        : !findingsReady
+          ? <Placeholder icon={runFinished ? "bug" : "radar"} title={runFinished ? "Loading findings..." : "Engagement in progress"}
+              note={runFinished ? "Fetching the confirmed findings for this run." : "Findings appear here as the agent confirms them - watch the Live run for the streaming trace."} />
+          : <FindingsList findings={findings} openFinding={openFinding} runId={runId} />; break;
     case "finding":
-      body = finding
-        ? <FindingDetail finding={finding} findings={findings} back={() => go("findings")} openFinding={openFinding} />
-        : <Placeholder icon="bug" title="Finding not found" note="Pick a finding from the list." />; break;
+      body = noRun || !findingsReady
+        ? <Placeholder icon="radar" title="Loading..." note="Findings are still being prepared for this run." />
+        : finding
+          ? <FindingDetail finding={finding} findings={findings} back={() => go("findings")} openFinding={openFinding} />
+          : <Placeholder icon="bug" title="Finding not found" note="Pick a finding from the list." />; break;
     case "report":
       body = noRun
         ? <Placeholder icon="doc" title="No report yet" note="Launch an engagement to generate a Markdown / JSON / SARIF report." />
-        : <Report findings={findings} runId={runId} meta={liveMeta} openFinding={openFinding} />; break;
+        : !findingsReady
+          ? <Placeholder icon={runFinished ? "doc" : "radar"} title={runFinished ? "Preparing report..." : "Engagement in progress"}
+              note={runFinished ? "Compiling the report from this run's confirmed findings." : "The report is generated once the engagement completes."} />
+          : <Report findings={findings} runId={runId} meta={liveMeta} openFinding={openFinding} />; break;
     case "knowledge":
       body = <KnowledgeBase />; break;
     case "settings":
-      body = <Settings />; break;
+      body = <Settings t={t} setTweak={setTweak} accents={ACCENTS} />; break;
     default:
       body = <Dashboard go={go} openEngagement={() => go("run")} />;
   }
 
+  // ---- auth gate (all hooks above run unconditionally) ----
+  if (me === undefined) return <div className="login-wrap"><div className="muted">Loading...</div></div>;
+  if (me === null) return <LoginScreen onLogin={handleLogin} />;
+
   return (
     <div className="app">
-      <Sidebar route={route} go={go} findingCount={findingCount} status={status} />
+      <Sidebar route={route} go={go} findingCount={findingCount} status={status}
+        user={me} onLogout={handleLogout} />
       <div className="main">
         <TopBar crumbs={crumbsFor()} target={showTarget ? target : null} right={topRight} />
-        <div className="content">{body}</div>
+        <div className="content"><ErrorBoundary key={route}>{body}</ErrorBoundary></div>
       </div>
 
       <TweaksPanel title="Tweaks">
@@ -170,6 +287,8 @@ function App() {
           </div>
         </TweakRow>
         <TweakSection label="Display" />
+        <TweakRadio label="Theme" value={t.theme} options={["auto", "light", "dark"]}
+          onChange={(v) => setTweak("theme", v)} />
         <TweakRadio label="Density" value={t.density} options={["comfortable", "compact"]}
           onChange={(v) => setTweak("density", v)} />
         <TweakRadio label="Default agent speed" value={String(t.runSpeed)} options={["1", "2", "4"]}

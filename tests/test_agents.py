@@ -21,9 +21,24 @@ def test_base_model_is_deepseek():
     assert _default(AgentRole.REPORTER) == "deepseek-chat"
 
 
+def test_nvidia_base_model_default_is_v4_pro_not_dead_r1():
+    """Regression: the NVIDIA-NIM base-model default (and config.base_model) drifted to
+    'deepseek-ai/deepseek-r1', which is NOT served by the live NVIDIA catalog
+    (chat/completions 404s). It must be the documented, catalog-present
+    'deepseek-ai/deepseek-v4-pro'. Also: no built-in NVIDIA alias may point at a model
+    absent from the catalog (the removed meta/llama-3.1-405b-instruct)."""
+    from venom.llm.providers import NVIDIA_NIM_DEFAULT, _DEFAULT_NVIDIA_MODELS
+    from venom.config import Settings
+    if not os.getenv("VENOM_BASE_MODEL"):     # honor a deliberate operator override
+        assert NVIDIA_NIM_DEFAULT.model == "deepseek-ai/deepseek-v4-pro"
+        assert Settings().base_model == "deepseek-ai/deepseek-v4-pro"
+    assert "deepseek-ai/deepseek-r1" not in _DEFAULT_NVIDIA_MODELS.values()
+    assert "meta/llama-3.1-405b-instruct" not in _DEFAULT_NVIDIA_MODELS.values()
+
+
 def test_fleet_assignments():
-    # All roles default to deepseek-chat; any role is upgradable to deepseek-reasoner
-    # via its VENOM_MODEL_<ROLE> env var.
+    # All roles default to deepseek-chat; upgrade a role to the heavier deepseek-v4-pro
+    # via its VENOM_MODEL_<ROLE> env var (deepseek-reasoner is only a legacy alias).
     assert _default(AgentRole.RESEARCH) == "deepseek-chat"
     assert _default(AgentRole.HYPOTHESIS) == "deepseek-chat"
     # CODEGEN drives the autonomous agent brain (oneshot) on DeepSeek V3.
@@ -54,10 +69,16 @@ def test_catalog_alias_resolution(monkeypatch):
     assert resolve_nvidia_model("myllm") == "acme/super-llm-v9"
 
 
-def test_role_var_accepts_alias(monkeypatch):
-    # Users can put a short alias in the role var instead of the full id.
+def test_role_var_passthrough_for_deepseek_provider(monkeypatch):
+    # Model resolution is provider-AWARE: a DeepSeek-provider role passes its
+    # configured model through UNCHANGED. The NVIDIA alias catalog must NOT be applied
+    # here - doing so would rewrite a name that collides with a catalog key (e.g.
+    # 'deepseek-v4-pro' -> 'deepseek-ai/deepseek-v4-pro') and DeepSeek would reject it
+    # with HTTP 400. (NVIDIA-role alias expansion is covered in
+    # tests/test_agent_model_resolution.py.)
     monkeypatch.setenv("VENOM_MODEL_RESEARCH", "glm-5.1")
-    assert DEFAULT_AGENTS[AgentRole.RESEARCH].model() == "z-ai/glm-5.1"
+    assert DEFAULT_AGENTS[AgentRole.RESEARCH].provider == Provider.DEEPSEEK
+    assert DEFAULT_AGENTS[AgentRole.RESEARCH].model() == "glm-5.1"
 
 
 class _StubProvider:
